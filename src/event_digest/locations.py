@@ -26,7 +26,7 @@ def resolve_event_location(event: dict) -> dict:
     """Resolve missing event coordinates from the event city."""
 
     event = {**event}
-    location = {**event.get("location", {})}
+    location = {**(event.get("location") or {})}
 
     raw_lat = location.get("latitude")
     raw_lon = location.get("longitude")

@@ -170,6 +170,62 @@ def test_resolve_marks_unresolvable_location_as_needing_geocoding(event):
     assert result["location"] == event.get("location", {})
 
 
+# --- resolve_event_location: missing or empty location ------------------------
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        pytest.param({"name": "Event"}, id="missing-location"),
+        pytest.param({"name": "Event", "location": None}, id="none-location"),
+        pytest.param({"name": "Event", "location": {}}, id="empty-location"),
+        pytest.param({"name": "Event", "location": ""}, id="empty-string-location"),
+        pytest.param({"name": "Event", "location": []}, id="empty-list-location"),
+    ],
+)
+def test_resolve_missing_or_empty_location_needs_geocoding(event):
+    result = resolve_event_location(event)
+
+    assert result == {
+        "name": "Event",
+        "location": {},
+        "locationStatus": "needs_geocoding",
+        "needsGeocoding": True,
+    }
+
+
+def test_resolve_none_location_matches_missing_location():
+    missing = resolve_event_location({"name": "Event"})
+    none = resolve_event_location({"name": "Event", "location": None})
+
+    assert none == missing
+
+
+def test_resolve_none_location_does_not_mutate_input():
+    event = {"name": "Event", "location": None}
+
+    result = resolve_event_location(event)
+
+    assert event == {"name": "Event", "location": None}
+    assert result["location"] == {}
+
+
+def test_resolve_valid_location_dictionary_is_copied_unchanged():
+    location = {
+        "venue": "Joutsa-talo",
+        "city": "Tampere",
+        "address": "Jousitie 1",
+        "latitude": None,
+        "longitude": None,
+    }
+
+    result = resolve_event_location({"name": "Event", "location": location})
+
+    assert result["location"] == location
+    assert result["location"] is not location
+    assert result["locationStatus"] == "needs_geocoding"
+
+
 # --- resolve_event_location: immutability ------------------------------------
 
 
@@ -418,7 +474,17 @@ def test_is_number_accepts_booleans():
     assert _is_number(False) is True
 
 
-def test_resolve_raises_for_none_location():
-    # Known issue: an explicit `"location": None` is not handled.
+@pytest.mark.parametrize(
+    "location",
+    [
+        pytest.param("Helsinki", id="string"),
+        pytest.param(["Lahti"], id="list"),
+        pytest.param(42, id="number"),
+    ],
+)
+def test_resolve_raises_for_non_empty_non_dict_location(location):
+    # Known issue: only dicts and empty values are supported; other location
+    # types still raise. filter_events_by_radius() has the same limitation
+    # (it raises AttributeError for them).
     with pytest.raises(TypeError):
-        resolve_event_location({"name": "Event", "location": None})
+        resolve_event_location({"name": "Event", "location": location})

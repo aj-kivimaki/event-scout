@@ -296,6 +296,15 @@ def test_parse_coordinate_valid(value, expected):
         pytest.param("unknown", id="text"),
         pytest.param({"value": 61.7}, id="dict"),
         pytest.param([61.7], id="list"),
+        pytest.param(math.nan, id="nan"),
+        pytest.param(math.inf, id="inf"),
+        pytest.param(-math.inf, id="negative-inf"),
+        pytest.param("nan", id="nan-string"),
+        pytest.param("NaN", id="nan-string-mixed-case"),
+        pytest.param("inf", id="inf-string"),
+        pytest.param("-inf", id="negative-inf-string"),
+        pytest.param("Infinity", id="infinity-string"),
+        pytest.param("1e400", id="overflows-to-inf"),
     ],
 )
 def test_parse_coordinate_missing_or_malformed_is_none(value):
@@ -808,6 +817,9 @@ def test_extract_jsonld_coordinates(geo, expected):
         pytest.param({"latitude": "60,1688", "longitude": "24.9398"}, (None, 24.9398), id="decimal-comma"),
         pytest.param({"latitude": "unknown", "longitude": "n/a"}, (None, None), id="text"),
         pytest.param({"latitude": {"value": 60.1}, "longitude": [24.9]}, (None, None), id="wrong-types"),
+        pytest.param({"latitude": "nan", "longitude": "24.9398"}, (None, 24.9398), id="nan-latitude"),
+        pytest.param({"latitude": "inf", "longitude": "24.9398"}, (None, 24.9398), id="inf-latitude"),
+        pytest.param({"latitude": "60.1688", "longitude": "-inf"}, (60.1688, None), id="negative-inf-longitude"),
     ],
 )
 def test_extract_jsonld_malformed_coordinates_are_missing(geo, expected):
@@ -819,11 +831,12 @@ def test_extract_jsonld_malformed_coordinates_are_missing(geo, expected):
     assert (result["location"]["latitude"], result["location"]["longitude"]) == expected
 
 
-def test_extract_jsonld_malformed_coordinate_keeps_later_events_in_block():
+@pytest.mark.parametrize("bad_latitude", ["unknown", "nan", "inf", "-inf"])
+def test_extract_jsonld_malformed_coordinate_keeps_later_events_in_block(bad_latitude):
     html = jsonld_page(
         [
             minimal_event("Before"),
-            minimal_event("Bad", location={"geo": {"latitude": "unknown", "longitude": "26.1"}}),
+            minimal_event("Bad", location={"geo": {"latitude": bad_latitude, "longitude": "26.1"}}),
             minimal_event("After", location={"geo": {"latitude": "61.7", "longitude": "26.1"}}),
         ],
         minimal_event("Next block"),
@@ -832,6 +845,7 @@ def test_extract_jsonld_malformed_coordinate_keeps_later_events_in_block():
     results = extract_jsonld(html, PAGE_URL)
 
     assert names(results) == ["Before", "Bad", "After", "Next block"]
+    assert results[1]["location"]["latitude"] is None
     assert results[2]["location"]["latitude"] == 61.7
 
 
@@ -962,6 +976,7 @@ def test_extract_allevents_missing_coordinates_are_none():
         pytest.param("", "", (None, None), id="empty-strings"),
         pytest.param("61,7417", "26.1142", (None, 26.1142), id="decimal-comma"),
         pytest.param("unknown", "", (None, None), id="text"),
+        pytest.param("nan", "inf", (None, None), id="non-finite"),
     ],
 )
 def test_extract_allevents_malformed_coordinates_are_missing(latitude, longitude, expected):
@@ -1250,20 +1265,6 @@ def test_allevents_records_inside_json_strings_are_not_detected():
     html = html_page(f"<script>window.allevents = JSON.parse({encoded});</script>")
 
     assert extract_allevents(html, ALLEVENTS_LISTING_URL) == []
-
-
-@pytest.mark.parametrize(
-    ("value", "check"),
-    [
-        ("nan", math.isnan),
-        ("inf", math.isinf),
-        ("-inf", math.isinf),
-    ],
-)
-def test_parse_coordinate_accepts_non_finite_values(value, check):
-    # Known issue: non-finite values are valid floats and pass through
-    # extraction unchanged; later stages must handle them.
-    assert check(_parse_coordinate(value))
 
 
 def test_allevents_numeric_coordinates_are_ignored():

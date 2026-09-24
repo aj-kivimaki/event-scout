@@ -275,6 +275,42 @@ def test_extract_real_allevents_page(client):
     assert {event["sourceType"] for event in events} == {"allevents"}
 
 
+def test_extract_returns_events_with_malformed_or_non_finite_coordinates(client):
+    # Regression: non-finite floats cannot be serialized to JSON, so a single
+    # "nan"/"inf" coordinate used to turn the whole page into a 500.
+    html = jsonld_html(
+        *(
+            {
+                "@type": "Event",
+                "name": name,
+                "startDate": "2026-10-03",
+                "location": {"geo": {"latitude": latitude, "longitude": longitude}},
+            }
+            for name, latitude, longitude in [
+                ("NaN latitude", "nan", "26.1"),
+                ("Inf latitude", "inf", "26.1"),
+                ("Negative inf longitude", "61.7", "-inf"),
+                ("Malformed", "61,7", "unknown"),
+                ("Zero", "0", 0),
+            ]
+        )
+    )
+
+    response = client.post("/events/extract", json={"html": html})
+
+    assert response.status_code == 200
+    assert [
+        (event["name"], event["location"]["latitude"], event["location"]["longitude"])
+        for event in response.json()
+    ] == [
+        ("NaN latitude", None, 26.1),
+        ("Inf latitude", None, 26.1),
+        ("Negative inf longitude", 61.7, None),
+        ("Malformed", None, None),
+        ("Zero", 0.0, 0.0),
+    ]
+
+
 def test_extract_uses_page_url_as_fallback(client):
     html = jsonld_html({"@type": "Event", "name": "No URL", "startDate": "2026-10-03"})
 

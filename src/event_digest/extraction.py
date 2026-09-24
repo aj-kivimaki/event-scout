@@ -1,4 +1,5 @@
 import json
+import math
 import re
 
 
@@ -49,15 +50,24 @@ def get_field(raw: str, field: str) -> str | None:
 
 
 def _parse_coordinate(value: object | None) -> float | None:
-    """Convert a coordinate to float, treating malformed values as missing."""
+    """Convert a coordinate to a finite float.
+
+    Missing, malformed and non-finite (NaN/inf) values are treated as
+    missing coordinates.
+    """
 
     if value is None:
         return None
 
     try:
-        return float(value)
+        coordinate = float(value)
     except (TypeError, ValueError):
         return None
+
+    if not math.isfinite(coordinate):
+        return None
+
+    return coordinate
 
 
 def normalize_date(value: object | None) -> str | None:

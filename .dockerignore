@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+n8n/
+data/
+config/
+prompts/
+workflows/
+README.md
+MVP.md
+*.json
+.DS_Store

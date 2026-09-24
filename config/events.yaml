@@ -1,0 +1,15 @@
+center:
+  name: Joutsa
+  latitude: 61.742667
+  longitude: 26.112972
+
+radius_km: 100
+
+lookahead_weeks: 3
+
+categories:
+  - concert
+  - live_music
+  - stand_up
+  - comedy
+  - cultural

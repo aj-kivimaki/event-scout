@@ -1,0 +1,631 @@
+[
+  {
+    "name": "Future Palace - Jyvaskyla - Lutakko - Oct 2, 2026",
+    "url": "https://www.jambase.com/show/future-palace-lutakko-20261002",
+    "startDate": "2026-10-02T19:00:00",
+    "endDate": "2026-10-02",
+    "location": {
+      "venue": "Lutakko",
+      "city": "Jyvaskyla",
+      "address": "Lutakonaukio 3",
+      "latitude": 62.2392,
+      "longitude": 25.7546
+    },
+    "description": "Future Palace at Lutakko on Oct 2, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 58.3
+  },
+  {
+    "name": "Antti Autio - Lahti - Finlandia-Klubi - Oct 2, 2026",
+    "url": "https://www.jambase.com/show/antti-autio-finlandia-klubi-20261002",
+    "startDate": "2026-10-02T19:00:00",
+    "endDate": "2026-10-02",
+    "location": {
+      "venue": "Finlandia-Klubi",
+      "city": "Lahti",
+      "address": "7 Ankkurikatu",
+      "latitude": 60.995,
+      "longitude": 25.6526
+    },
+    "description": "Antti Autio at Finlandia-Klubi on Oct 2, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.7
+  },
+  {
+    "name": "Olli Halonen - Mikkeli - Wilhelm Public House - Oct 3, 2026",
+    "url": "https://www.jambase.com/show/olli-halonen-wilhelm-public-house-20261003",
+    "startDate": "2026-10-03T22:00:00",
+    "endDate": "2026-10-03",
+    "location": {
+      "venue": "Wilhelm Public House",
+      "city": "Mikkeli",
+      "address": "10 Porrassalmenkatu",
+      "latitude": 61.6856,
+      "longitude": 27.273
+    },
+    "description": "Olli Halonen at Wilhelm Public House on Oct 3, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 61.5
+  },
+  {
+    "name": "Future Palace - Jyvaskyla - Lutakko - Oct 2, 2026",
+    "url": "https://www.jambase.com/show/future-palace-lutakko-20261002",
+    "startDate": "2026-10-02T19:00:00",
+    "endDate": "2026-10-02",
+    "location": {
+      "venue": "Lutakko",
+      "city": "Jyvaskyla",
+      "address": "Lutakonaukio 3",
+      "latitude": 62.2392,
+      "longitude": 25.7546
+    },
+    "description": "Future Palace at Lutakko on Oct 2, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 58.3
+  },
+  {
+    "name": "Antti Railio - Jyväskylä - Taulumäen kirkko - Oct 15, 2026",
+    "url": "https://www.jambase.com/show/antti-railio-taulumaen-kirkko-20261015",
+    "startDate": "2026-10-15T19:00:00",
+    "endDate": "2026-10-15",
+    "location": {
+      "venue": "Taulumäen kirkko",
+      "city": "Jyväskylä",
+      "address": "Lohikoskentie 2",
+      "latitude": 62.2534,
+      "longitude": 25.7505
+    },
+    "description": "Antti Railio at Taulumäen kirkko on Oct 15, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 59.9
+  },
+  {
+    "name": "Antti Railio @ Taulumäen Kirkko",
+    "url": "https://www.songkick.com/concerts/42991002-antti-railio-at-taulumaen-kirkko?utm_medium=organic&utm_source=microformat",
+    "startDate": "2026-10-15T19:00:00",
+    "endDate": "2026-10-15",
+    "location": {
+      "venue": "Taulumäen Kirkko",
+      "city": "Jyväskylä",
+      "address": "Lohikoskentie 2",
+      "latitude": 62.25349,
+      "longitude": 25.75068
+    },
+    "description": "Antti Railio at Taulumäen Kirkko at 2026-10-15T19:00:00+0300",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 59.9
+  },
+  {
+    "name": "Happoradio @ Kulttuuritalo Tempo",
+    "url": "https://www.songkick.com/concerts/43232716-happoradio-at-kulttuuritalo-tempo?utm_medium=organic&utm_source=microformat",
+    "startDate": "2026-10-02",
+    "endDate": "2026-10-02",
+    "location": {
+      "venue": "Kulttuuritalo Tempo",
+      "city": "Mikkeli",
+      "address": null,
+      "latitude": 61.7666,
+      "longitude": 27.11607
+    },
+    "description": "Happoradio at Kulttuuritalo Tempo at 2026-10-02",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 52.9
+  },
+  {
+    "name": "Olli Halonen @ Wilhelm Public House",
+    "url": "https://www.songkick.com/concerts/43274310-olli-halonen-at-wilhelm-public-house?utm_medium=organic&utm_source=microformat",
+    "startDate": "2026-10-03T22:00:00",
+    "endDate": "2026-10-03",
+    "location": {
+      "venue": "Wilhelm Public House",
+      "city": "Mikkeli",
+      "address": "Porrassalmenaktu 10",
+      "latitude": 61.68559,
+      "longitude": 27.27315
+    },
+    "description": "Olli Halonen at Wilhelm Public House at 2026-10-03T22:00:00+0300",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 61.5
+  },
+  {
+    "name": "Teflon Brothers @ Wilhelm Public House",
+    "url": "https://www.songkick.com/concerts/43274307-teflon-brothers-at-wilhelm-public-house?utm_medium=organic&utm_source=microformat",
+    "startDate": "2026-10-17T22:00:00",
+    "endDate": "2026-10-17",
+    "location": {
+      "venue": "Wilhelm Public House",
+      "city": "Mikkeli",
+      "address": "Porrassalmenaktu 10",
+      "latitude": 61.68559,
+      "longitude": 27.27315
+    },
+    "description": "Teflon Brothers at Wilhelm Public House at 2026-10-17T22:00:00+0300",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 61.5
+  },
+  {
+    "name": "Viiden Tähden Kiertue",
+    "url": "https://www.ticketmaster.fi/event/viiden-tahden-kiertue-tickets/1965083337?language=en-us",
+    "startDate": "2026-10-03T19:00:00",
+    "endDate": "2026-10-03",
+    "location": {
+      "venue": "SIBELIUSTALO",
+      "city": "LAHTI",
+      "address": "Ankkurikatu 7",
+      "latitude": 60.99479,
+      "longitude": 25.65076
+    },
+    "description": "Viiden Tähden Kiertue | Saturday, 3 Oct 2026, 19.00 | SIBELIUSTALO, LAHTI",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.7
+  },
+  {
+    "name": "Pepe Willberg 80 Juhlakonsertti: Elämältä kaiken sain",
+    "url": "https://www.ticketmaster.fi/event/pepe-willberg-80-juhlakonsertti-elamalta-kaiken-sain-tickets/566040209?language=en-us",
+    "startDate": "2026-10-14T18:30:00",
+    "endDate": "2026-10-14",
+    "location": {
+      "venue": "SIBELIUSTALO",
+      "city": "LAHTI",
+      "address": "Ankkurikatu 7",
+      "latitude": 60.99479,
+      "longitude": 25.65076
+    },
+    "description": "Pepe Willberg 80 Juhlakonsertti: Elämältä kaiken sain | Wednesday, 14 Oct 2026, 18.30 | SIBELIUSTALO, LAHTI",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.7
+  },
+  {
+    "name": "Souvarit",
+    "url": "https://gigs.guide/event/ZTagKj9J1v/souvarit-heinola-02-oct-2026",
+    "startDate": "2026-10-02T18:00:00.000Z",
+    "endDate": "2026-10-02T21:00:00.000Z",
+    "location": {
+      "venue": "Hotelli Kumpeli",
+      "city": "Heinola",
+      "address": null,
+      "latitude": 61.2059,
+      "longitude": 26.0156
+    },
+    "description": "Experience the electrifying performance of Souvarit at Hotelli Kumpeli in Heinola,  Finland on Fri, 02, Oct, 2026. Get all the details, buy tickets, and plan your musical journey with GigsGuide",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 59.9
+  },
+  {
+    "name": "Antti Autio @ FINLANDIA-KLUBI, Sibeliustalo",
+    "url": "https://www.bandsintown.com/e/1039030834-antti-autio-at-finlandia-klubi-sibeliustalo?came_from=209",
+    "startDate": "2026-10-02T19:00:00",
+    "endDate": "2026-10-02",
+    "location": {
+      "venue": "FINLANDIA-KLUBI, Sibeliustalo",
+      "city": null,
+      "address": "",
+      "latitude": 60.98267,
+      "longitude": 25.66151
+    },
+    "description": "Antti Autio",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 87.9
+  },
+  {
+    "name": "Jami Faltin @ Ravintola Hovi",
+    "url": "https://www.bandsintown.com/e/108843938-jami-faltin-at-ravintola-hovi?came_from=209",
+    "startDate": "2026-10-03T12:00:00",
+    "endDate": "2026-10-03",
+    "location": {
+      "venue": "Ravintola Hovi",
+      "city": null,
+      "address": "",
+      "latitude": 61.07795170000001,
+      "longitude": 25.0115269
+    },
+    "description": "Jami Faltin",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 94.3
+  },
+  {
+    "name": "Omnivortex @ VNUE Lahti",
+    "url": "https://www.bandsintown.com/e/108497098-omnivortex-at-vnue-lahti?came_from=209",
+    "startDate": "2026-10-03T19:00:00",
+    "endDate": "2026-10-03",
+    "location": {
+      "venue": "VNUE Lahti",
+      "city": null,
+      "address": "",
+      "latitude": 60.98267,
+      "longitude": 25.66151
+    },
+    "description": "Omnivortex",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 87.9
+  },
+  {
+    "name": "Michael Monroe @ Hotel Kumpeli",
+    "url": "https://www.bandsintown.com/e/108800554-michael-monroe-at-hotel-kumpeli?came_from=209",
+    "startDate": "2026-10-03T19:00:00",
+    "endDate": "2026-10-03",
+    "location": {
+      "venue": "Hotel Kumpeli",
+      "city": null,
+      "address": "",
+      "latitude": 61.2059023,
+      "longitude": 26.0156411
+    },
+    "description": "Michael Monroe Solo",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 59.9
+  },
+  {
+    "name": "Mariska @ Lahti City Theater",
+    "url": "https://www.bandsintown.com/e/108190063-mariska-at-lahti-city-theater?came_from=209",
+    "startDate": "2026-10-03T19:00:00",
+    "endDate": "2026-10-03",
+    "location": {
+      "venue": "Lahti City Theater",
+      "city": null,
+      "address": "",
+      "latitude": 60.984406,
+      "longitude": 25.670071
+    },
+    "description": "Mariska",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 87.6
+  },
+  {
+    "name": "Horizon Ignited @ VNUE Lahti",
+    "url": "https://www.bandsintown.com/e/108497070-horizon-ignited-at-vnue-lahti?came_from=209",
+    "startDate": "2026-10-03T19:00:00",
+    "endDate": "2026-10-03",
+    "location": {
+      "venue": "VNUE Lahti",
+      "city": null,
+      "address": "",
+      "latitude": 60.98267,
+      "longitude": 25.66151
+    },
+    "description": "Horizon Ignited",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 87.9
+  },
+  {
+    "name": "Terveetmielet @ Tirra",
+    "url": "https://www.bandsintown.com/e/108928856-terveetmielet-at-tirra?came_from=209",
+    "startDate": "2026-10-03T20:00:00",
+    "endDate": "2026-10-03",
+    "location": {
+      "venue": "Tirra",
+      "city": null,
+      "address": "",
+      "latitude": 60.97876409999999,
+      "longitude": 25.6581383
+    },
+    "description": "Terveetmielet",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 88.3
+  },
+  {
+    "name": "Tuure Kilpeläinen @ Pato Klubi",
+    "url": "https://www.bandsintown.com/e/108745910-tuure-kilpelainen-at-pato-klubi?came_from=209",
+    "startDate": "2026-10-04T19:00:00",
+    "endDate": "2026-10-04",
+    "location": {
+      "venue": "Pato Klubi",
+      "city": null,
+      "address": "",
+      "latitude": 60.9034618,
+      "longitude": 26.6512929
+    },
+    "description": "Tuure Kilpeläinen - Suomalaisii unelmii -konserttisalikiertue",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 97.6
+  },
+  {
+    "name": "St. Aurora @ Möysän Musaklubi",
+    "url": "https://www.bandsintown.com/e/108443594-st.-aurora-at-moysan-musaklubi?came_from=209",
+    "startDate": "2026-10-09T17:00:00",
+    "endDate": "2026-10-09",
+    "location": {
+      "venue": "Möysän Musaklubi",
+      "city": null,
+      "address": "",
+      "latitude": 60.98215930000001,
+      "longitude": 25.657247
+    },
+    "description": "Möysä",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 88
+  },
+  {
+    "name": "LOST SOCIETY @ Möysän Musaklubi",
+    "url": "https://www.bandsintown.com/e/108438539-lost-society-at-moysan-musaklubi?came_from=209",
+    "startDate": "2026-10-09T18:00:00",
+    "endDate": "2026-10-09",
+    "location": {
+      "venue": "Möysän Musaklubi",
+      "city": null,
+      "address": "",
+      "latitude": 60.98215930000001,
+      "longitude": 25.657247
+    },
+    "description": "LOST SOCIETY",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 88
+  },
+  {
+    "name": "Happoradio @ Pato Areena",
+    "url": "https://www.bandsintown.com/e/108421839-happoradio-at-pato-areena?came_from=209",
+    "startDate": "2026-10-09T20:00:00",
+    "endDate": "2026-10-09",
+    "location": {
+      "venue": "Pato Areena",
+      "city": null,
+      "address": "",
+      "latitude": 60.9034618,
+      "longitude": 26.6512929
+    },
+    "description": "Happoradio",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 97.6
+  },
+  {
+    "name": "Sami Hedberg @ Sibeliustalo",
+    "url": "https://www.bandsintown.com/e/1038306506-sami-hedberg-at-sibeliustalo?came_from=209",
+    "startDate": "2026-10-10T18:00:00",
+    "endDate": "2026-10-10",
+    "location": {
+      "venue": "Sibeliustalo",
+      "city": null,
+      "address": "",
+      "latitude": 60.994801,
+      "longitude": 25.647499
+    },
+    "description": "Sami Hedberg",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.8
+  },
+  {
+    "name": "Maija Vilkkumaa @ Finlandia-Klubi",
+    "url": "https://www.bandsintown.com/e/108389068-maija-vilkkumaa-at-finlandia-klubi?came_from=209",
+    "startDate": "2026-10-10T19:00:00",
+    "endDate": "2026-10-10",
+    "location": {
+      "venue": "Finlandia-Klubi",
+      "city": null,
+      "address": "",
+      "latitude": 60.9949932,
+      "longitude": 25.6526488
+    },
+    "description": "Karaoke-queen (levyjulkkarit)",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.7
+  },
+  {
+    "name": "DJ Kridlokk @ Ravintola Torvi",
+    "url": "https://www.bandsintown.com/e/108348017-dj-kridlokk-at-ravintola-torvi?came_from=209",
+    "startDate": "2026-10-10T19:00:00",
+    "endDate": "2026-10-10",
+    "location": {
+      "venue": "Ravintola Torvi",
+      "city": null,
+      "address": "",
+      "latitude": 60.97899,
+      "longitude": 25.65781
+    },
+    "description": "UG Solo 15V",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 88.3
+  },
+  {
+    "name": "Michael Monroe @ Bar & Bistro Route 431",
+    "url": "https://www.bandsintown.com/e/108800593-michael-monroe-at-bar-and-bistro-route-431?came_from=209",
+    "startDate": "2026-10-10T19:00:00",
+    "endDate": "2026-10-10",
+    "location": {
+      "venue": "Bar & Bistro Route 431",
+      "city": null,
+      "address": "",
+      "latitude": 61.6453147,
+      "longitude": 27.0739043
+    },
+    "description": "Michael Monroe Solo",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 51.8
+  },
+  {
+    "name": "Wardruna @ Sibeliustalo",
+    "url": "https://www.bandsintown.com/e/106485699-wardruna-at-sibeliustalo?came_from=209",
+    "startDate": "2026-10-13T20:00:00",
+    "endDate": "2026-10-13",
+    "location": {
+      "venue": "Sibeliustalo",
+      "city": null,
+      "address": "",
+      "latitude": 60.994801,
+      "longitude": 25.647499
+    },
+    "description": "Wardruna - World Tour 2025 - Sibeliustalo",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.8
+  },
+  {
+    "name": "Eva Vikman @ Sipuran Navetta Kesäkahvila",
+    "url": "https://www.bandsintown.com/e/108794242-eva-vikman-at-sipuran-navetta-kesakahvila?came_from=209",
+    "startDate": "2026-10-14T18:00:00",
+    "endDate": "2026-10-14",
+    "location": {
+      "venue": "Sipuran Navetta Kesäkahvila",
+      "city": null,
+      "address": "",
+      "latitude": 61.0113213,
+      "longitude": 25.770651
+    },
+    "description": "Eva Vikman",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 83.3
+  },
+  {
+    "name": "Ani @ FINLANDIA-KLUBI, Sibeliustalo",
+    "url": "https://www.bandsintown.com/e/1039125600-ani-at-finlandia-klubi-sibeliustalo?came_from=209",
+    "startDate": "2026-10-16T19:00:00",
+    "endDate": "2026-10-16",
+    "location": {
+      "venue": "FINLANDIA-KLUBI, Sibeliustalo",
+      "city": null,
+      "address": "",
+      "latitude": 60.98267,
+      "longitude": 25.66151
+    },
+    "description": "Ani",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 87.9
+  },
+  {
+    "name": "Antti Autio - Lahti - Finlandia-Klubi - Oct 2, 2026",
+    "url": "https://www.jambase.com/show/antti-autio-finlandia-klubi-20261002",
+    "startDate": "2026-10-02T19:00:00",
+    "endDate": "2026-10-02",
+    "location": {
+      "venue": "Finlandia-Klubi",
+      "city": "Lahti",
+      "address": "7 Ankkurikatu",
+      "latitude": 60.995,
+      "longitude": 25.6526
+    },
+    "description": "Antti Autio at Finlandia-Klubi on Oct 2, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.7
+  },
+  {
+    "name": "Maija Vilkkumaa - Lahti - Finlandia-Klubi - Oct 10, 2026",
+    "url": "https://www.jambase.com/show/maija-vilkkumaa-finlandia-klubi-20261010",
+    "startDate": "2026-10-10T21:00:00",
+    "endDate": "2026-10-10",
+    "location": {
+      "venue": "Finlandia-Klubi",
+      "city": "Lahti",
+      "address": "7 Ankkurikatu",
+      "latitude": 60.995,
+      "longitude": 25.6526
+    },
+    "description": "Maija Vilkkumaa at Finlandia-Klubi on Oct 10, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.7
+  },
+  {
+    "name": "Wardruna - Lahti - Sibeliustalo - Oct 13, 2026",
+    "url": "https://www.jambase.com/show/wardruna-sibeliustalo-20261013",
+    "startDate": "2026-10-13T20:00:20",
+    "endDate": "2026-10-13",
+    "location": {
+      "venue": "Sibeliustalo",
+      "city": "Lahti",
+      "address": "Ankkurikatu 7 ",
+      "latitude": 60.995,
+      "longitude": 25.6526
+    },
+    "description": "Wardruna at Sibeliustalo on Oct 13, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.7
+  },
+  {
+    "name": "Ani - Lahti - Finlandia-Klubi - Oct 16, 2026",
+    "url": "https://www.jambase.com/show/ani-finlandia-klubi-20261016",
+    "startDate": "2026-10-16T19:00:00",
+    "endDate": "2026-10-16",
+    "location": {
+      "venue": "Finlandia-Klubi",
+      "city": "Lahti",
+      "address": "7 Ankkurikatu",
+      "latitude": 60.995,
+      "longitude": 25.6526
+    },
+    "description": "Ani at Finlandia-Klubi on Oct 16, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.7
+  },
+  {
+    "name": "Antti Autio - Lahti - Finlandia-Klubi - Oct 2, 2026",
+    "url": "https://www.jambase.com/show/antti-autio-finlandia-klubi-20261002",
+    "startDate": "2026-10-02T19:00:00",
+    "endDate": "2026-10-02",
+    "location": {
+      "venue": "Finlandia-Klubi",
+      "city": "Lahti",
+      "address": "7 Ankkurikatu",
+      "latitude": 60.995,
+      "longitude": 25.6526
+    },
+    "description": "Antti Autio at Finlandia-Klubi on Oct 2, 2026",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 86.7
+  },
+  {
+    "name": "Wardruna",
+    "url": "https://concertful.com/event/858687",
+    "startDate": "2026-10-13T20:00:20",
+    "endDate": "2026-10-13",
+    "location": {
+      "venue": "SIBELIUSTALO",
+      "city": "Lahti",
+      "address": null,
+      "latitude": 60.9827,
+      "longitude": 25.6615
+    },
+    "description": "Wardruna in Lahti at SIBELIUSTALO on Oct 13, 2026.",
+    "locationStatus": "city_resolved",
+    "needsGeocoding": false,
+    "distanceKm": 87.9
+  },
+  {
+    "name": "Coffee and encounters",
+    "url": "https://www.gowith.events/event/coffee-and-encounters-2026-keuruu",
+    "startDate": "2026-08-28T13:00:00+03:00",
+    "endDate": "2026-11-27T14:00:00+02:00",
+    "location": {
+      "venue": "Keuruu",
+      "city": "Keuruu",
+      "address": "Koulutie 3c, Keuruu, Suomi",
+      "latitude": 62.260668,
+      "longitude": 24.703354
+    },
+    "description": "Welcome to the free get-together events for the elderly. The events consist of expert presentations and introductions to the activities of organizations. The sessions end with a joint coffee break. Coffee and encounters events have been organized since 2018. The events are generally held on the last Friday of each month at 1 p.m. (excluding holiday periods). The venue is the Kimara Cultural House, address Koulutie 3C. The organizers are the Keuruu associations, the Central Finland Welfare Area, and the parishes. \n \nFall 2026 program \nFriday, August 28, 2026, 1 p.m. - 2 p.m. Brain health for all ages! \n \nOrganized by the Memory Bridge Project/Central Finland Memory Association. A senior welfare clinic nurse will be present. \n \nFriday, September 25, 2026, 1 p.m. - 2 p.m. Senior digital. Come and listen and try - could some aid or device help you or your aging loved one in everyday life? \n \nOrganized by the JAMK Senior Digital Project. A senior welfare clinic nurse will be present. \n \nFriday, October 30, 2026, 1 p.m. - 2 p.m. In traffic at any age \n \nOrganized by the Traffic Safety Agency. \n \nFriday, November 27, 2026, 1 p.m. - 2 p.m. Movie: Keuruu 30 years - a city celebration (2016). Duration 40 minutes.",
+    "locationStatus": "coordinates_available",
+    "needsGeocoding": false,
+    "distanceKm": 93.4
+  }
+]

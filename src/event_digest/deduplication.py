@@ -246,33 +246,36 @@ def merge_event(
             "distanceKm"
         )
 
+    # "location" may be missing or explicitly None.
+    event_location = event.get("location") or {}
+
     existing["location"] = {
-        **(event.get("location") or {}),
+        **event_location,
         **(existing.get("location") or {}),
     }
 
     if (
         not existing["location"].get("venue")
-        and event.get("location", {}).get("venue")
+        and event_location.get("venue")
     ):
         existing["location"]["venue"] = (
-            event["location"]["venue"]
+            event_location["venue"]
         )
 
     if (
         not existing["location"].get("city")
-        and event.get("location", {}).get("city")
+        and event_location.get("city")
     ):
         existing["location"]["city"] = (
-            event["location"]["city"]
+            event_location["city"]
         )
 
     if (
         not existing["location"].get("address")
-        and event.get("location", {}).get("address")
+        and event_location.get("address")
     ):
         existing["location"]["address"] = (
-            event["location"]["address"]
+            event_location["address"]
         )
 
     if (

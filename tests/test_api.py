@@ -16,7 +16,10 @@ import yaml
 from fastapi.testclient import TestClient
 
 from src.event_digest import api, search_context
-from src.event_digest.dates import calculate_date_range
+from src.event_digest.dates import calculate_date_range, filter_events_by_date
+from src.event_digest.deduplication import deduplicate_events
+from src.event_digest.extraction import extract_event_data
+from src.event_digest.locations import filter_events_by_radius, resolve_event_location
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ALLEVENTS_PAGE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "allevents-jyvaskyla-music.html"
@@ -792,6 +795,293 @@ def test_request_level_validation_is_unchanged_for_config_endpoints(client, path
     assert response.json()["detail"][0]["type"] == "string_type"
 
 
+# --- Event validation --------------------------------------------------------
+# Batch endpoints validate events individually: invalid events are skipped and
+# valid events continue. /events/location validates its single event and
+# returns 422 for an invalid one.
+
+BATCH_ENDPOINTS = {
+    "/events/filter-radius": {**JOUTSA, "radius_km": 100},
+    "/events/filter-date": {"start_date": START_DATE, "end_date": END_DATE},
+    "/events/deduplicate": {},
+}
+
+MALFORMED_EVENTS = [
+    pytest.param({"location": "Helsinki"}, id="location-string"),
+    pytest.param({"location": ["Helsinki"]}, id="location-list"),
+    pytest.param({"startDate": 20261001}, id="start-date-number"),
+    pytest.param({"description": 5}, id="description-number"),
+    pytest.param({"sourceUrls": "https://a.example"}, id="source-urls-string"),
+    pytest.param({"sourceUrls": ["https://a.example", None]}, id="source-urls-null-item"),
+    pytest.param({"price": {"amount": 5}}, id="price-object"),
+    pytest.param({"location": {"latitude": "abc", "longitude": 26.1}}, id="latitude-text"),
+    pytest.param({"location": {"latitude": "nan", "longitude": 26.1}}, id="latitude-nan"),
+    pytest.param({"needsGeocoding": "maybe"}, id="needs-geocoding-text"),
+]
+
+
+def valid_event(name: str, **fields) -> dict:
+    """An event that passes every batch endpoint unchanged."""
+
+    return {
+        "name": name,
+        "startDate": "2026-10-01",
+        "endDate": "2026-10-01",
+        "location": {"latitude": 61.7417, "longitude": 26.1142},
+        **fields,
+    }
+
+
+def post_batch(client, path: str, events: list[dict]):
+    return client.post(path, json={"events": events, **BATCH_ENDPOINTS[path]})
+
+
+@pytest.mark.parametrize("path", BATCH_ENDPOINTS)
+@pytest.mark.parametrize("malformed", MALFORMED_EVENTS)
+def test_batch_skips_malformed_event_and_keeps_valid_ones(client, path, malformed):
+    events = [
+        valid_event("Before"),
+        {**valid_event("Malformed"), **malformed},
+        valid_event("After", startDate="2026-10-02", endDate="2026-10-02"),
+    ]
+
+    response = post_batch(client, path, events)
+
+    assert response.status_code == 200
+    assert [event["name"] for event in response.json()] == ["Before", "After"]
+
+
+def test_batch_logs_skipped_events(client, caplog):
+    events = [valid_event("Valid"), {"name": "Bad", "location": "Helsinki"}]
+
+    with caplog.at_level("WARNING", logger="src.event_digest.models"):
+        post_batch(client, "/events/deduplicate", events)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Skipping invalid event at index 1: location: Input should be a valid dictionary or instance of Location" in messages
+    assert "Validated events: 2 received, 1 valid, 1 skipped" in messages
+
+
+def test_batch_with_only_malformed_events_returns_empty_list(client):
+    response = post_batch(client, "/events/deduplicate", [{"startDate": 1}, {"location": "x"}])
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_batch_skips_nan_json_literal_instead_of_failing(client):
+    # Python's JSON parser accepts the non-standard NaN literal.
+    body = (
+        '{"events": [{"name": "Bad", "location": {"latitude": NaN, "longitude": 26.1}}, '
+        '{"name": "Good", "location": {"latitude": 61.7, "longitude": 26.1}}], '
+        '"center_lat": 61.742667, "center_lon": 26.112972, "radius_km": 100}'
+    )
+
+    response = client.post(
+        "/events/filter-radius",
+        content=body,
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert [event["name"] for event in response.json()] == ["Good"]
+
+
+def test_source_urls_string_is_not_split_into_characters(client):
+    events = [{"name": "A", "startDate": "2026-10-01", "url": "u", "sourceUrls": "abc"}]
+
+    response = post_batch(client, "/events/deduplicate", events)
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.parametrize("path", BATCH_ENDPOINTS)
+@pytest.mark.parametrize(
+    "location",
+    [
+        pytest.param(None, id="none-location"),
+        pytest.param({}, id="empty-location"),
+    ],
+)
+def test_batch_accepts_missing_or_empty_location(client, path, location):
+    event = {"name": "A", "startDate": "2026-10-01", "location": location}
+
+    response = post_batch(client, path, [event])
+
+    assert response.status_code == 200
+    if path == "/events/filter-radius":
+        # No coordinates: skipped by the radius filter itself, as before.
+        assert response.json() == []
+    else:
+        assert response.json()[0]["location"] == location
+
+
+@pytest.mark.parametrize("path", BATCH_ENDPOINTS)
+def test_batch_preserves_unknown_fields(client, path):
+    event = valid_event(
+        "A",
+        customField={"nested": [1, 2]},
+        fetchIndex=7,
+        location={"latitude": 61.7417, "longitude": 26.1142, "postalCode": "19650"},
+    )
+
+    response = post_batch(client, path, [event])
+
+    [result] = response.json()
+    assert result["customField"] == {"nested": [1, 2]}
+    assert result["fetchIndex"] == 7
+    assert result["location"]["postalCode"] == "19650"
+
+
+@pytest.mark.parametrize("path", BATCH_ENDPOINTS)
+def test_batch_does_not_add_unset_fields(client, path):
+    event = valid_event("A")
+
+    response = post_batch(client, path, [event])
+
+    [result] = response.json()
+    added_by_endpoint = {
+        "/events/filter-radius": {"distanceKm"},
+        "/events/filter-date": set(),
+        "/events/deduplicate": {"sourceUrls"},
+    }[path]
+    assert set(result) == set(event) | added_by_endpoint
+    assert set(result["location"]) == {"latitude", "longitude"}
+
+
+@pytest.mark.parametrize(
+    ("latitude", "longitude"),
+    [
+        pytest.param(0, 0, id="int-zero"),
+        pytest.param(0.0, 0.0, id="float-zero"),
+        pytest.param("0", "0", id="string-zero"),
+    ],
+)
+def test_zero_coordinates_are_accepted(client, latitude, longitude):
+    event = {"name": "Null Island", "location": {"latitude": latitude, "longitude": longitude}}
+
+    location = client.post("/events/location", json={"event": event})
+    radius = post_batch(client, "/events/filter-radius", [event])
+    far_radius = client.post(
+        "/events/filter-radius",
+        json={"events": [event], **JOUTSA, "radius_km": 20000},
+    )
+
+    assert location.status_code == 200
+    assert location.json()["locationStatus"] == "coordinates_available"
+    assert location.json()["location"] == {"latitude": 0, "longitude": 0}
+    assert radius.json() == []
+    assert far_radius.json()[0]["location"] == {"latitude": 0, "longitude": 0}
+
+
+@pytest.mark.parametrize(
+    ("event", "error_type", "location"),
+    [
+        pytest.param({"location": "Helsinki"}, "model_type", ("body", "event", "location"), id="location-string"),
+        pytest.param({"startDate": 20261001}, "string_type", ("body", "event", "startDate"), id="start-date-number"),
+        pytest.param(
+            {"location": {"latitude": "nan"}},
+            "finite_number",
+            ("body", "event", "location", "latitude"),
+            id="latitude-nan",
+        ),
+        pytest.param({"sourceUrls": "abc"}, "list_type", ("body", "event", "sourceUrls"), id="source-urls-string"),
+    ],
+)
+def test_location_endpoint_rejects_malformed_event(client, event, error_type, location):
+    response = client.post("/events/location", json={"event": event})
+
+    assert response.status_code == 422
+    assert (error_type, location) in validation_errors(response)
+
+
+def test_location_endpoint_preserves_unknown_fields(client):
+    event = {"name": "A", "customField": 1, "location": {"city": "Lahti", "postalCode": "15100"}}
+
+    response = client.post("/events/location", json={"event": event})
+
+    assert response.json() == {
+        "name": "A",
+        "customField": 1,
+        "location": {"city": "Lahti", "postalCode": "15100", "latitude": 60.9827, "longitude": 25.6615},
+        "locationStatus": "city_resolved",
+        "needsGeocoding": False,
+    }
+
+
+def test_real_pages_through_api_match_domain_pipeline(client):
+    """The n8n pipeline through the API gives the same result as the domain
+    functions called directly, for real extracted events."""
+
+    pages = [
+        (PROJECT_ROOT / "config" / "test-event-page.html", "https://www.jambase.com/concerts/fi"),
+        (ALLEVENTS_PAGE_PATH, "https://allevents.in/jyv%c3%a4skyl%c3%a4/music"),
+    ]
+
+    # Domain pipeline, called directly.
+    extracted = []
+    for path, page_url in pages:
+        extracted.extend(extract_event_data(path.read_text(encoding="utf-8"), page_url))
+    expected_counts = [len(extracted)]
+    expected = filter_events_by_date(extracted, START_DATE, END_DATE)
+    expected_counts.append(len(expected))
+    expected = [resolve_event_location(event) for event in expected]
+    expected = filter_events_by_radius(expected, JOUTSA["center_lat"], JOUTSA["center_lon"], 100)
+    expected_counts.append(len(expected))
+    expected = deduplicate_events(expected)
+    expected_counts.append(len(expected))
+
+    # Same pipeline through the API, in n8n order.
+    events = []
+    for path, page_url in pages:
+        response = client.post(
+            "/events/extract",
+            json={"html": path.read_text(encoding="utf-8"), "page_url": page_url},
+        )
+        events.extend(response.json())
+    counts = [len(events)]
+
+    events = client.post(
+        "/events/filter-date",
+        json={"events": events, "start_date": START_DATE, "end_date": END_DATE},
+    ).json()
+    counts.append(len(events))
+
+    events = [client.post("/events/location", json={"event": event}).json() for event in events]
+    events = client.post("/events/filter-radius", json={"events": events, **JOUTSA, "radius_km": 100}).json()
+    counts.append(len(events))
+
+    events = client.post("/events/deduplicate", json={"events": events}).json()
+    counts.append(len(events))
+
+    assert counts == expected_counts
+    # JamBase alone: 181 -> 71 -> 8 -> 6 (as in the n8n test-data run).
+    assert counts == [196, 76, 13, 11]
+    assert events == json.loads(json.dumps(expected))
+
+
+def test_deduplicate_duplicate_with_none_location(client):
+    # Regression: merging a duplicate with "location": None used to return 500.
+    events = [
+        {"name": "A", "startDate": "2026-10-01", "url": "https://a.example"},
+        {"name": "A", "startDate": "2026-10-01", "url": "https://b.example", "location": None},
+    ]
+
+    response = client.post("/events/deduplicate", json={"events": events})
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "name": "A",
+            "startDate": "2026-10-01",
+            "url": "https://a.example",
+            "sourceUrls": ["https://a.example", "https://b.example"],
+            "location": {},
+        }
+    ]
+
+
 # --- Current behavior: known issues ------------------------------------------
 # These tests document the existing API contract, including behavior that is
 # probably wrong. They are intentionally explicit so that fixing any of these
@@ -887,63 +1177,6 @@ def test_filter_date_accepts_invalid_date_strings(client, start_date, end_date):
 
     assert response.status_code == 200
     assert response.json() == []
-
-
-@pytest.mark.parametrize(
-    ("path", "body"),
-    [
-        # Known issue: events are typed as plain dicts, so malformed event
-        # contents reach the domain functions and crash them.
-        pytest.param(
-            "/events/location",
-            {"event": {"location": "Helsinki"}},
-            id="location-string-resolve",
-        ),
-        pytest.param(
-            "/events/filter-radius",
-            {"events": [{"location": "Helsinki"}], **JOUTSA, "radius_km": 100},
-            id="location-string-radius",
-        ),
-        pytest.param(
-            "/events/filter-date",
-            {"events": [{"startDate": 20261001}], "start_date": START_DATE, "end_date": END_DATE},
-            id="start-date-number-date-filter",
-        ),
-        pytest.param(
-            "/events/filter-date",
-            {
-                "events": [{"startDate": "2026-01-01", "endDate": "2027-01-01", "description": 5}],
-                "start_date": START_DATE,
-                "end_date": END_DATE,
-            },
-            id="description-number-date-filter",
-        ),
-        pytest.param(
-            "/events/deduplicate",
-            {"events": [{"name": "A", "startDate": 1}]},
-            id="start-date-number-deduplicate",
-        ),
-        pytest.param(
-            "/events/deduplicate",
-            {"events": [{"name": "A", "startDate": "2026-10-01"}, {"name": "A", "startDate": "2026-10-01", "location": None}]},
-            id="duplicate-with-none-location",
-        ),
-    ],
-)
-def test_malformed_event_contents_return_500(client, path, body):
-    response = client.post(path, json=body)
-
-    assert response.status_code == 500
-
-
-def test_deduplicate_splits_string_source_urls_into_characters(client):
-    # Known issue: sourceUrls is assumed to be a list; a string is iterated.
-    events = [{"name": "A", "startDate": "2026-10-01", "url": "u", "sourceUrls": "abc"}]
-
-    response = client.post("/events/deduplicate", json={"events": events})
-
-    assert response.status_code == 200
-    assert response.json()[0]["sourceUrls"] == ["a", "b", "c", "u"]
 
 
 def test_extract_without_page_url_leaves_events_without_source(client):

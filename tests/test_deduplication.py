@@ -515,6 +515,104 @@ def test_deduplicate_does_not_mutate_input():
     assert all(group is not event for group in result for event in events)
 
 
+# --- deduplicate_events: location None --------------------------------------
+# "location": None is valid input (see the Event model) and is treated like a
+# missing location: no coordinates, so distance cannot be compared.
+
+
+def test_deduplicate_merges_duplicates_with_none_locations():
+    events = [
+        make_event(url="https://a.example", location=None, description="First"),
+        make_event(url="https://b.example", location=None),
+    ]
+
+    result = deduplicate_events(events)
+
+    assert len(result) == 1
+    assert result[0]["sourceUrls"] == ["https://a.example", "https://b.example"]
+    assert result[0]["description"] == "First"
+
+
+def test_deduplicate_none_locations_behave_like_missing_locations():
+    with_none = [make_event(url="https://a.example", location=None), make_event(url="https://b.example", location=None)]
+    missing = [make_event(url="https://a.example"), make_event(url="https://b.example")]
+
+    assert deduplicate_events(with_none) == deduplicate_events(missing)
+
+
+def test_deduplicate_none_location_duplicate_keeps_group_location():
+    events = [
+        make_event(url="https://a.example", location=base_location(venue="Hall", city="Joutsa")),
+        make_event(url="https://b.example", location=None),
+    ]
+
+    [result] = deduplicate_events(events)
+
+    assert result["location"] == base_location(venue="Hall", city="Joutsa")
+    assert result["sourceUrls"] == ["https://a.example", "https://b.example"]
+
+
+def test_deduplicate_none_location_group_takes_duplicate_location():
+    events = [
+        make_event(url="https://a.example", location=None),
+        make_event(url="https://b.example", location=base_location(venue="Hall"), distanceKm=0.1),
+    ]
+
+    [result] = deduplicate_events(events)
+
+    assert result["location"] == base_location(venue="Hall")
+    assert result["distanceKm"] == 0.1
+
+
+def test_deduplicate_many_missing_or_none_locations():
+    events = [
+        make_event(url="https://1.example", location=None),
+        make_event(url="https://2.example"),
+        make_event(url="https://3.example", location=None),
+        make_event(url="https://4.example", location={}),
+        make_event("Other artist", url="https://5.example", location=None),
+    ]
+
+    result = deduplicate_events(events)
+
+    assert [group["sourceUrls"] for group in result] == [
+        ["https://1.example", "https://2.example", "https://3.example", "https://4.example"],
+        ["https://5.example"],
+    ]
+
+
+def test_deduplicate_none_location_does_not_change_coordinate_matching():
+    # Same as test_deduplicate_event_without_coordinates_joins_first_matching_group,
+    # with an explicit None location.
+    events = [
+        make_event(url="https://near.example", location=base_location()),
+        make_event(url="https://far.example", location=location_north_of_base(50)),
+        make_event(url="https://unknown.example", location=None),
+    ]
+
+    result = deduplicate_events(events)
+
+    assert [group["sourceUrls"] for group in result] == [
+        ["https://near.example", "https://unknown.example"],
+        ["https://far.example"],
+    ]
+
+
+def test_deduplicate_single_none_location_event_is_unchanged():
+    event = make_event(url="https://a.example", location=None)
+
+    assert deduplicate_events([event]) == [{**event, "sourceUrls": ["https://a.example"]}]
+
+
+def test_deduplicate_none_location_does_not_mutate_input():
+    events = [make_event(location=base_location()), make_event(location=None)]
+    original = copy.deepcopy(events)
+
+    deduplicate_events(events)
+
+    assert events == original
+
+
 # --- Current behavior: known issues ------------------------------------------
 # These tests document the existing implementation, including behavior that is
 # probably wrong. They are intentionally explicit so that fixing any of these
@@ -548,15 +646,6 @@ def test_merge_with_coordinates_but_no_distance_clears_existing_distance():
     ]
 
     assert deduplicate_events(events)[0]["distanceKm"] is None
-
-
-def test_merge_raises_for_duplicate_with_none_location():
-    # Known issue: `event.get("location", {})` returns None for an explicit
-    # `"location": None`, which is then dereferenced.
-    events = [make_event(), make_event(location=None)]
-
-    with pytest.raises(AttributeError):
-        deduplicate_events(events)
 
 
 def test_non_string_start_date_raises():

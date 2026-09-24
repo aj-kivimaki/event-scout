@@ -18,6 +18,10 @@ from src.event_digest.locations import (
     filter_events_by_radius,
     resolve_event_location,
 )
+from src.event_digest.models import (
+    validate_event,
+    validate_events,
+)
 from src.event_digest.queries import generate_search_queries
 from src.event_digest.search_context import build_search_context
 
@@ -56,6 +60,30 @@ class DeduplicationRequest(BaseModel):
 
 
 CONFIG_ERROR_LOCATION = ["body", "yaml_text"]
+EVENT_ERROR_LOCATION = ["body", "event"]
+
+
+def validation_error_details(
+    error: ValidationError,
+    location: list[str],
+) -> list[dict]:
+    """Format a Pydantic error like FastAPI's request-validation errors.
+
+    Error locations are prefixed with the request field that was validated.
+    """
+
+    details = json.loads(error.json(include_url=False))
+
+    return [
+        {
+            **detail,
+            "loc": [
+                *location,
+                *detail["loc"],
+            ],
+        }
+        for detail in details
+    ]
 
 
 @contextmanager
@@ -69,20 +97,12 @@ def config_errors_as_http() -> Iterator[None]:
     try:
         yield
     except ValidationError as error:
-        details = json.loads(error.json(include_url=False))
-
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=[
-                {
-                    **detail,
-                    "loc": [
-                        *CONFIG_ERROR_LOCATION,
-                        *detail["loc"],
-                    ],
-                }
-                for detail in details
-            ],
+            detail=validation_error_details(
+                error,
+                CONFIG_ERROR_LOCATION,
+            ),
         ) from error
     except yaml.YAMLError as error:
         detail = {
@@ -186,7 +206,20 @@ def extract_events(request: EventExtractionRequest):
 def resolve_event_location_endpoint(
     request: EventLocationRequest,
 ):
-    return resolve_event_location(request.event)
+    # A single event has nothing to skip, so an invalid event is a
+    # client error.
+    try:
+        event = validate_event(request.event)
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=validation_error_details(
+                error,
+                EVENT_ERROR_LOCATION,
+            ),
+        ) from error
+
+    return resolve_event_location(event)
 
 
 @app.post("/events/filter-radius")
@@ -194,7 +227,7 @@ def filter_events_radius_endpoint(
     request: RadiusFilterRequest,
 ):
     return filter_events_by_radius(
-        events=request.events,
+        events=validate_events(request.events),
         center_lat=request.center_lat,
         center_lon=request.center_lon,
         radius_km=request.radius_km,
@@ -206,7 +239,7 @@ def filter_events_date_endpoint(
     request: DateFilterRequest,
 ):
     return filter_events_by_date(
-        events=request.events,
+        events=validate_events(request.events),
         start_date=request.start_date,
         end_date=request.end_date,
     )
@@ -216,4 +249,6 @@ def filter_events_date_endpoint(
 def deduplicate_events_endpoint(
     request: DeduplicationRequest,
 ):
-    return deduplicate_events(request.events)
+    return deduplicate_events(
+        validate_events(request.events)
+    )

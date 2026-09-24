@@ -1,7 +1,11 @@
+import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict
 
-from fastapi import FastAPI
-from pydantic import BaseModel
+import yaml
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, ValidationError
 
 from src.config.parser import parse_config
 from src.event_digest.dates import (
@@ -51,6 +55,68 @@ class DeduplicationRequest(BaseModel):
     events: list[dict]
 
 
+CONFIG_ERROR_LOCATION = ["body", "yaml_text"]
+
+
+@contextmanager
+def config_errors_as_http() -> Iterator[None]:
+    """Report invalid configuration as a 422 client error.
+
+    Errors follow FastAPI's request-validation format, with locations
+    prefixed by the request field that contains the YAML configuration.
+    """
+
+    try:
+        yield
+    except ValidationError as error:
+        details = json.loads(error.json(include_url=False))
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=[
+                {
+                    **detail,
+                    "loc": [
+                        *CONFIG_ERROR_LOCATION,
+                        *detail["loc"],
+                    ],
+                }
+                for detail in details
+            ],
+        ) from error
+    except yaml.YAMLError as error:
+        detail = {
+            "type": "yaml_invalid",
+            "loc": CONFIG_ERROR_LOCATION,
+            "msg": f"Invalid YAML: {error}",
+        }
+
+        mark = getattr(error, "problem_mark", None)
+
+        if mark is not None:
+            detail["ctx"] = {
+                "line": mark.line + 1,
+                "column": mark.column + 1,
+            }
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=[detail],
+        ) from error
+    except ValueError as error:
+        # Raised by parse_config() for YAML that is not a mapping.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=[
+                {
+                    "type": "config_invalid",
+                    "loc": CONFIG_ERROR_LOCATION,
+                    "msg": str(error),
+                }
+            ],
+        ) from error
+
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
@@ -58,7 +124,8 @@ def health_check():
 
 @app.post("/config/parse")
 def parse_config_endpoint(request: ConfigRequest):
-    config = parse_config(request.yaml_text)
+    with config_errors_as_http():
+        config = parse_config(request.yaml_text)
 
     return config.model_dump()
 
@@ -77,7 +144,8 @@ def calculate_dates(lookahead_weeks: int):
 
 @app.post("/search/context")
 def create_search_context(request: ConfigRequest):
-    context = build_search_context(request.yaml_text)
+    with config_errors_as_http():
+        context = build_search_context(request.yaml_text)
 
     return {
         "config": context["config"].model_dump(),
@@ -88,7 +156,8 @@ def create_search_context(request: ConfigRequest):
 
 @app.post("/search/queries")
 def create_search_queries(request: ConfigRequest):
-    context = build_search_context(request.yaml_text)
+    with config_errors_as_http():
+        context = build_search_context(request.yaml_text)
 
     queries = generate_search_queries(
         start_date=str(context["start_date"]),

@@ -289,77 +289,136 @@ def test_filter_handles_empty_input():
     assert filter_near_joutsa([]) == []
 
 
+# --- Coordinate validation ---------------------------------------------------
+
+NON_FINITE_VALUES = [
+    pytest.param(math.nan, id="nan"),
+    pytest.param("nan", id="nan-string"),
+    pytest.param(math.inf, id="inf"),
+    pytest.param("inf", id="inf-string"),
+    pytest.param(-math.inf, id="negative-inf"),
+    pytest.param("-inf", id="negative-inf-string"),
+]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(0, id="zero"),
+        pytest.param(0.0, id="zero-float"),
+        pytest.param("0", id="zero-string"),
+        pytest.param(-0.0, id="negative-zero"),
+        pytest.param(61.5, id="positive"),
+        pytest.param(-33.8688, id="negative"),
+        pytest.param(26, id="int"),
+        pytest.param("61.5", id="numeric-string"),
+        pytest.param("-151.2093", id="negative-numeric-string"),
+        pytest.param(" 61.5 ", id="numeric-string-with-whitespace"),
+    ],
+)
+def test_is_number_accepts_finite_numbers(value):
+    assert _is_number(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(None, id="none"),
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="whitespace"),
+        pytest.param("abc", id="text"),
+        pytest.param("61,5", id="decimal-comma"),
+        pytest.param([61.5], id="list"),
+        pytest.param({"lat": 61.5}, id="dict"),
+        *NON_FINITE_VALUES,
+    ],
+)
+def test_is_number_rejects_missing_invalid_and_non_finite_values(value):
+    assert _is_number(value) is False
+
+
+@pytest.mark.parametrize(
+    ("latitude", "longitude"),
+    [
+        pytest.param(0, 0, id="int-zero"),
+        pytest.param(0.0, 0.0, id="float-zero"),
+        pytest.param("0", "0", id="string-zero"),
+        pytest.param(0, 26.1, id="zero-latitude"),
+        pytest.param(61.7, 0, id="zero-longitude"),
+    ],
+)
+def test_resolve_preserves_zero_coordinates(latitude, longitude):
+    event = make_event(latitude=latitude, longitude=longitude, city="Lahti")
+
+    result = resolve_event_location(event)
+
+    assert result["locationStatus"] == "coordinates_available"
+    assert result["needsGeocoding"] is False
+    assert result["location"] == event["location"]
+
+
+@pytest.mark.parametrize("bad_value", NON_FINITE_VALUES)
+def test_resolve_non_finite_coordinates_fall_back_to_city(bad_value):
+    result = resolve_event_location(make_event(latitude=bad_value, longitude=26.1, city="Lahti"))
+
+    assert result["locationStatus"] == "city_resolved"
+    assert (result["location"]["latitude"], result["location"]["longitude"]) == CITY_COORDINATES["Lahti"]
+
+
+@pytest.mark.parametrize("bad_value", NON_FINITE_VALUES)
+def test_resolve_non_finite_coordinates_without_city_need_geocoding(bad_value):
+    result = resolve_event_location(make_event(latitude=61.7, longitude=bad_value))
+
+    assert result["locationStatus"] == "needs_geocoding"
+    assert result["needsGeocoding"] is True
+
+
+def test_filter_includes_zero_coordinates():
+    # (0, 0) is a valid coordinate; it is just far away from Joutsa.
+    event = make_event(latitude=0, longitude=0)
+
+    assert filter_near_joutsa([event]) == []
+    assert len(filter_near_joutsa([event], radius_km=math.inf)) == 1
+
+
+@pytest.mark.parametrize("bad_value", NON_FINITE_VALUES)
+def test_filter_skips_non_finite_coordinates(bad_value):
+    events = [
+        make_event(latitude=bad_value, longitude=26.1),
+        make_event(latitude=61.7, longitude=bad_value),
+    ]
+
+    assert filter_near_joutsa(events) == []
+
+
+def test_filter_non_finite_coordinates_do_not_affect_valid_events():
+    events = [
+        make_event(city="Joutsa", latitude=61.7417, longitude=26.1142),
+        make_event(city="Bad", latitude=math.inf, longitude=26.1),
+        make_event(city="Lahti", latitude=60.9827, longitude=25.6615),
+        make_event(city="Worse", latitude="nan", longitude="-inf"),
+        make_event(city="Jyväskylä", latitude="62.2426", longitude="25.7473"),
+    ]
+
+    results = filter_near_joutsa(events)
+
+    assert [event["location"]["city"] for event in results] == ["Joutsa", "Lahti", "Jyväskylä"]
+    assert [event["distanceKm"] for event in results] == [0.1, 87.9, 58.8]
+
+
 # --- Current behavior: known issues ------------------------------------------
 # These tests document the existing implementation, including behavior that is
 # probably wrong. They are intentionally explicit so that fixing any of these
 # issues becomes a deliberate, visible test change.
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (61.5, True),
-        ("61.5", True),
-        ("abc", False),
-        (None, False),
-        ([61.5], False),
-        # Known issue: zero is treated as "not a number" because the helper
-        # returns bool(float(value)).
-        (0, False),
-        (0.0, False),
-        ("0", False),
-        # Known issue: despite the docstring, non-finite values are accepted.
-        (math.nan, True),
-        (math.inf, True),
-        ("nan", True),
-        # Known issue: booleans are accepted as numbers.
-        (True, True),
-    ],
-)
-def test_is_number_current_behavior(value, expected):
-    assert _is_number(value) is expected
-
-
-def test_resolve_treats_zero_coordinates_as_missing():
-    # Known issue: (0, 0) is a valid coordinate but is replaced by the city.
-    result = resolve_event_location(make_event(latitude=0, longitude=0, city="Lahti"))
-
-    assert result["locationStatus"] == "city_resolved"
-    assert (result["location"]["latitude"], result["location"]["longitude"]) == CITY_COORDINATES["Lahti"]
-
-
-@pytest.mark.parametrize("bad_value", [math.nan, math.inf, -math.inf])
-def test_resolve_accepts_non_finite_coordinates(bad_value):
-    # Known issue: non-finite coordinates are reported as available.
-    result = resolve_event_location(make_event(latitude=bad_value, longitude=26.1, city="Lahti"))
-
-    assert result["locationStatus"] == "coordinates_available"
-    assert result["needsGeocoding"] is False
+def test_is_number_accepts_booleans():
+    # Known issue: bool is a subclass of int, so True/False pass as 1.0/0.0.
+    assert _is_number(True) is True
+    assert _is_number(False) is True
 
 
 def test_resolve_raises_for_none_location():
     # Known issue: an explicit `"location": None` is not handled.
     with pytest.raises(TypeError):
         resolve_event_location({"name": "Event", "location": None})
-
-
-@pytest.mark.parametrize("bad_value", [math.nan, "nan"])
-def test_filter_silently_drops_nan_coordinates(bad_value):
-    assert filter_near_joutsa([make_event(latitude=bad_value, longitude=26.1)]) == []
-
-
-@pytest.mark.parametrize(
-    "location",
-    [
-        pytest.param({"latitude": math.inf, "longitude": 26.1}, id="inf-latitude"),
-        pytest.param({"latitude": 61.7, "longitude": -math.inf}, id="negative-inf-longitude"),
-        pytest.param({"latitude": "inf", "longitude": 26.1}, id="inf-string"),
-    ],
-)
-def test_filter_raises_for_infinite_coordinates(location):
-    # Known issue: the error is raised outside the try/except, so a single bad
-    # event fails the whole batch instead of being skipped.
-    events = [make_event(latitude=61.7, longitude=26.1), make_event(**location)]
-
-    with pytest.raises(ValueError, match="math domain error"):
-        filter_near_joutsa(events)

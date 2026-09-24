@@ -1,4 +1,4 @@
-from math import asin, cos, radians, sin, sqrt
+from math import asin, cos, isfinite, radians, sin, sqrt
 
 
 CITY_COORDINATES = {
@@ -82,14 +82,14 @@ def filter_events_by_radius(
         latitude = location.get("latitude")
         longitude = location.get("longitude")
 
-        if latitude is None or longitude is None:
+        if not (
+            _is_number(latitude)
+            and _is_number(longitude)
+        ):
             continue
 
-        try:
-            latitude = float(latitude)
-            longitude = float(longitude)
-        except (TypeError, ValueError):
-            continue
+        latitude = float(latitude)
+        longitude = float(longitude)
 
         distance_km = _haversine_distance(
             center_lat,
@@ -134,6 +134,6 @@ def _is_number(value) -> bool:
     """Return whether a value can be converted to a finite number."""
 
     try:
-        return bool(float(value))
+        return isfinite(float(value))
     except (TypeError, ValueError):
         return False

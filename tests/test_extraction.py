@@ -1,10 +1,12 @@
 import copy
 import json
+import math
 from pathlib import Path
 
 import pytest
 
 from src.event_digest.extraction import (
+    _parse_coordinate,
     clean_text,
     collect_jsonld_events,
     decode,
@@ -259,6 +261,45 @@ def test_clean_text(value, expected):
 )
 def test_get_field(raw, field, expected):
     assert get_field(raw, field) == expected
+
+
+# --- _parse_coordinate -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param("61.7417", 61.7417, id="string"),
+        pytest.param(" 61.7417 ", 61.7417, id="string-with-whitespace"),
+        pytest.param("-33.8688", -33.8688, id="negative"),
+        pytest.param(26.1142, 26.1142, id="float"),
+        pytest.param(26, 26.0, id="int"),
+        pytest.param(0, 0.0, id="zero"),
+        pytest.param("0", 0.0, id="zero-string"),
+    ],
+)
+def test_parse_coordinate_valid(value, expected):
+    result = _parse_coordinate(value)
+
+    assert result == expected
+    assert isinstance(result, float)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(None, id="none"),
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="whitespace"),
+        pytest.param("61,7417", id="decimal-comma"),
+        pytest.param("61.7417N", id="suffix"),
+        pytest.param("unknown", id="text"),
+        pytest.param({"value": 61.7}, id="dict"),
+        pytest.param([61.7], id="list"),
+    ],
+)
+def test_parse_coordinate_missing_or_malformed_is_none(value):
+    assert _parse_coordinate(value) is None
 
 
 # --- normalize_date ----------------------------------------------------------
@@ -760,6 +801,40 @@ def test_extract_jsonld_coordinates(geo, expected):
     assert (location["latitude"], location["longitude"]) == expected
 
 
+@pytest.mark.parametrize(
+    ("geo", "expected"),
+    [
+        pytest.param({"latitude": "", "longitude": ""}, (None, None), id="empty-strings"),
+        pytest.param({"latitude": "60,1688", "longitude": "24.9398"}, (None, 24.9398), id="decimal-comma"),
+        pytest.param({"latitude": "unknown", "longitude": "n/a"}, (None, None), id="text"),
+        pytest.param({"latitude": {"value": 60.1}, "longitude": [24.9]}, (None, None), id="wrong-types"),
+    ],
+)
+def test_extract_jsonld_malformed_coordinates_are_missing(geo, expected):
+    event = minimal_event("Kept", location={"name": "Venue", "geo": geo})
+
+    result = extract_single(event)
+
+    assert result["name"] == "Kept"
+    assert (result["location"]["latitude"], result["location"]["longitude"]) == expected
+
+
+def test_extract_jsonld_malformed_coordinate_keeps_later_events_in_block():
+    html = jsonld_page(
+        [
+            minimal_event("Before"),
+            minimal_event("Bad", location={"geo": {"latitude": "unknown", "longitude": "26.1"}}),
+            minimal_event("After", location={"geo": {"latitude": "61.7", "longitude": "26.1"}}),
+        ],
+        minimal_event("Next block"),
+    )
+
+    results = extract_jsonld(html, PAGE_URL)
+
+    assert names(results) == ["Before", "Bad", "After", "Next block"]
+    assert results[2]["location"]["latitude"] == 61.7
+
+
 # --- extract_allevents -------------------------------------------------------
 
 
@@ -879,6 +954,40 @@ def test_extract_allevents_missing_coordinates_are_none():
     location = extract_single_allevents(latitude=None, longitude=None)["location"]
 
     assert (location["latitude"], location["longitude"]) == (None, None)
+
+
+@pytest.mark.parametrize(
+    ("latitude", "longitude", "expected"),
+    [
+        pytest.param("", "", (None, None), id="empty-strings"),
+        pytest.param("61,7417", "26.1142", (None, 26.1142), id="decimal-comma"),
+        pytest.param("unknown", "", (None, None), id="text"),
+    ],
+)
+def test_extract_allevents_malformed_coordinates_are_missing(latitude, longitude, expected):
+    result = extract_single_allevents(latitude=latitude, longitude=longitude)
+
+    assert result["eventId"] == "3200012345"
+    assert (result["location"]["latitude"], result["location"]["longitude"]) == expected
+
+
+def test_extract_allevents_zero_coordinates_are_kept():
+    location = extract_single_allevents(latitude="0", longitude="0")["location"]
+
+    assert (location["latitude"], location["longitude"]) == (0.0, 0.0)
+
+
+def test_extract_allevents_malformed_coordinate_keeps_other_records():
+    html = allevents_page(
+        allevents_record(event_id="1", eventname="Before"),
+        allevents_record(event_id="2", eventname="Bad", latitude="61,7417"),
+        allevents_record(event_id="3", eventname="After"),
+    )
+
+    results = extract_allevents(html, None)
+
+    assert [event["eventId"] for event in results] == ["1", "2", "3"]
+    assert [event["location"]["latitude"] for event in results] == [61.7417, None, 61.7417]
 
 
 def test_extract_allevents_decodes_json_escapes_and_html_ampersands():
@@ -1143,6 +1252,20 @@ def test_allevents_records_inside_json_strings_are_not_detected():
     assert extract_allevents(html, ALLEVENTS_LISTING_URL) == []
 
 
+@pytest.mark.parametrize(
+    ("value", "check"),
+    [
+        ("nan", math.isnan),
+        ("inf", math.isinf),
+        ("-inf", math.isinf),
+    ],
+)
+def test_parse_coordinate_accepts_non_finite_values(value, check):
+    # Known issue: non-finite values are valid floats and pass through
+    # extraction unchanged; later stages must handle them.
+    assert check(_parse_coordinate(value))
+
+
 def test_allevents_numeric_coordinates_are_ignored():
     # Known issue: only string values are read, so numeric coordinates are
     # dropped. Real pages currently use strings.
@@ -1162,34 +1285,12 @@ def test_get_field_does_not_read_unquoted_values():
     assert get_field('{"latitude": 61.7417}', "latitude") is None
 
 
-@pytest.mark.parametrize("latitude", ["", "61,7417", "unknown"])
-def test_allevents_invalid_coordinate_raises(latitude):
-    # Known issue: float() is not guarded, so one bad record fails the page.
-    with pytest.raises(ValueError):
-        extract_allevents(allevents_page(allevents_record(latitude=latitude)), None)
-
-
 def test_jsonld_offers_list_gives_no_price():
     # Known issue: schema.org allows (and JamBase uses) a list of offers, but
     # only a single offers object is read.
     event = minimal_event(offers=[{"@type": "Offer", "price": "25.00"}])
 
     assert extract_single(event)["price"] is None
-
-
-def test_jsonld_invalid_coordinate_drops_rest_of_block():
-    # Known issue: the ValueError from float() is caught per script block, so
-    # the bad event and all later events in the same block are lost.
-    html = jsonld_page(
-        [
-            minimal_event("Before"),
-            minimal_event("Bad", location={"geo": {"latitude": "unknown", "longitude": "26.1"}}),
-            minimal_event("After"),
-        ],
-        minimal_event("Next block"),
-    )
-
-    assert names(extract_jsonld(html, PAGE_URL)) == ["Before", "Next block"]
 
 
 def test_jsonld_unquoted_type_attribute_is_not_found():

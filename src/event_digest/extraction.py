@@ -48,6 +48,18 @@ def get_field(raw: str, field: str) -> str | None:
     return decode(match.group(1))
 
 
+def _parse_coordinate(value: object | None) -> float | None:
+    """Convert a coordinate to float, treating malformed values as missing."""
+
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_date(value: object | None) -> str | None:
     """Normalize an ISO date value to YYYY-MM-DD."""
 
@@ -370,15 +382,11 @@ def extract_jsonld(
                         "address": clean_text(
                             address.get("streetAddress")
                         ),
-                        "latitude": (
-                            float(latitude)
-                            if latitude is not None
-                            else None
+                        "latitude": _parse_coordinate(
+                            latitude
                         ),
-                        "longitude": (
-                            float(longitude)
-                            if longitude is not None
-                            else None
+                        "longitude": _parse_coordinate(
+                            longitude
                         ),
                     },
                     "description": clean_text(
@@ -561,15 +569,11 @@ def extract_allevents(
                     or full_address
                     or venue
                 ),
-                "latitude": (
-                    float(latitude)
-                    if latitude is not None
-                    else None
+                "latitude": _parse_coordinate(
+                    latitude
                 ),
-                "longitude": (
-                    float(longitude)
-                    if longitude is not None
-                    else None
+                "longitude": _parse_coordinate(
+                    longitude
                 ),
             },
             "description": clean_text(

@@ -404,6 +404,58 @@ def extract_jsonld(
     return results
 
 
+ALLEVENTS_RECORD_START = re.compile(
+    r'\{\s*"event_id"\s*:'
+)
+
+
+def iter_allevents_records(html: str):
+    """Yield Allevents event records embedded as JSON objects in the page.
+
+    Allevents listing pages embed events in script assignments such as
+    `_this.events_data = [{"event_id": "...", "eventname": "...", ...}]`.
+    Each record is decoded as a complete JSON object so that fields cannot
+    leak between records or from the rest of the page.
+    """
+
+    decoder = json.JSONDecoder()
+    record_end = -1
+
+    for match in ALLEVENTS_RECORD_START.finditer(html):
+        # Skip matches nested inside an already decoded record.
+        if match.start() < record_end:
+            continue
+
+        try:
+            record, record_end = decoder.raw_decode(
+                html,
+                match.start(),
+            )
+        except json.JSONDecodeError:
+            # Ignore truncated or otherwise invalid records.
+            continue
+
+        if isinstance(record, dict):
+            yield record
+
+
+def get_allevents_field(
+    record: dict,
+    field: str,
+) -> str | None:
+    """Return a text field from an Allevents record or its venue."""
+
+    value = record.get(field)
+
+    if value is None and isinstance(record.get("venue"), dict):
+        value = record["venue"].get(field)
+
+    if not isinstance(value, str):
+        return None
+
+    return decode(value)
+
+
 def extract_allevents(
     html: str,
     page_url: str | None,
@@ -412,38 +464,21 @@ def extract_allevents(
 
     results = []
 
-    matches = list(
-        re.finditer(
-            r'\\"?event_id\\"?\s*:\s*\\"?[^"]+\\"?\s*,'
-            r'\s*\\"?eventname\\"?',
-            html,
-        )
-    )
-
-    for index, match in enumerate(matches):
-        start = match.start()
-
-        if index + 1 < len(matches):
-            end = matches[index + 1].start()
-        else:
-            end = len(html)
-
-        raw = html[start:end]
-
-        event_id = get_field(
-            raw,
+    for record in iter_allevents_records(html):
+        event_id = get_allevents_field(
+            record,
             "event_id",
         )
-        name = get_field(
-            raw,
+        name = get_allevents_field(
+            record,
             "eventname",
         )
 
         if not event_id or not name:
             continue
 
-        country = get_field(
-            raw,
+        country = get_allevents_field(
+            record,
             "country",
         )
 
@@ -451,8 +486,8 @@ def extract_allevents(
         if country and country.lower() != "finland":
             continue
 
-        start_display = get_field(
-            raw,
+        start_display = get_allevents_field(
+            record,
             "start_time_display",
         )
 
@@ -463,42 +498,42 @@ def extract_allevents(
         if not event_date:
             continue
 
-        venue = get_field(
-            raw,
+        venue = get_allevents_field(
+            record,
             "location",
         )
-        city = get_field(
-            raw,
+        city = get_allevents_field(
+            record,
             "city",
         )
-        street = get_field(
-            raw,
+        street = get_allevents_field(
+            record,
             "street",
         )
-        full_address = get_field(
-            raw,
+        full_address = get_allevents_field(
+            record,
             "full_address",
         )
-        latitude = get_field(
-            raw,
+        latitude = get_allevents_field(
+            record,
             "latitude",
         )
-        longitude = get_field(
-            raw,
+        longitude = get_allevents_field(
+            record,
             "longitude",
         )
-        event_url = get_field(
-            raw,
+        event_url = get_allevents_field(
+            record,
             "event_url",
         )
 
         description = (
-            get_field(
-                raw,
+            get_allevents_field(
+                record,
                 "short_description",
             )
-            or get_field(
-                raw,
+            or get_allevents_field(
+                record,
                 "description",
             )
         )

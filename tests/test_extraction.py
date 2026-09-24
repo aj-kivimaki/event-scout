@@ -15,6 +15,7 @@ from src.event_digest.extraction import (
     get_field,
     get_jsonld_time,
     is_event_type,
+    iter_allevents_records,
     normalize_date,
     parse_allevents_display_date,
 )
@@ -117,47 +118,60 @@ def extract_single(data, page_url: str | None = PAGE_URL) -> dict:
 ALLEVENTS_URL = "https://allevents.in/joutsa/stand-up-ismo-leikola/3200012345"
 ALLEVENTS_LISTING_URL = "https://allevents.in/joutsa/comedy"
 
+ALLEVENTS_JYVASKYLA_PATH = PROJECT_ROOT / "tests" / "fixtures" / "allevents-jyvaskyla-music.html"
+ALLEVENTS_JYVASKYLA_URL = "https://allevents.in/jyv%c3%a4skyl%c3%a4/music"
+ALLEVENTS_ULVERSTONE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "allevents-ulverstone-live-music.html"
+
+# Top-level record fields; everything else lives in the nested "venue" object,
+# matching real Allevents listing pages (see tests/fixtures/allevents-*.html).
 ALLEVENTS_FIELDS = {
     "event_id": "3200012345",
     "eventname": "Stand-up: Ismo Leikola",
     "start_time_display": "Sat Oct 3 2026 at 07:00 pm",
     "location": "Joutsa-talo",
-    "city": "Joutsa",
-    "street": "Jousitie 1",
-    "full_address": "Jousitie 1, 19650 Joutsa, Finland",
-    "latitude": "61.7417",
-    "longitude": "26.1142",
-    "country": "Finland",
     "event_url": ALLEVENTS_URL,
     "short_description": "Stand-up evening in Jyväskylä & Joutsa.",
 }
 
+ALLEVENTS_VENUE_FIELDS = {
+    "street": "Jousitie 1",
+    "city": "Joutsa",
+    "country": "Finland",
+    "latitude": "61.7417",
+    "longitude": "26.1142",
+    "full_address": "Jousitie 1, 19650 Joutsa, Finland",
+}
 
-def allevents_record(**overrides) -> str:
-    """Build one Allevents record that the current extractor can read.
 
-    Known issue: extract_allevents() locates records with a pattern that
-    requires backslash-escaped quotes (`\\"event_id\\"`), but get_field()
-    only reads unescaped quotes (`"event_id"`). Neither plain JSON nor escaped
-    JSON works on its own (see the known-issue tests), so this builder emits an
-    escaped marker followed by the plain JSON fields. When the extractor is
-    fixed, this is the one place the fixture format should change.
+def allevents_record(**overrides) -> dict:
+    """Build one Allevents record in the real listing-page structure.
+
+    Overrides for venue fields are applied to the nested "venue" object.
+    An override of None removes the field.
     """
 
-    fields = {**ALLEVENTS_FIELDS, **overrides}
-    fields = {key: value for key, value in fields.items() if value is not None}
-    marker = (
-        rf'\"event_id\":\"{fields.get("event_id", "0")}\",'
-        rf'\"eventname\":\"marker\"'
-    )
-    return f"{marker} {json.dumps(fields)}"
+    record = dict(ALLEVENTS_FIELDS)
+    venue = dict(ALLEVENTS_VENUE_FIELDS)
+
+    for key, value in overrides.items():
+        target = venue if key in ALLEVENTS_VENUE_FIELDS else record
+        target[key] = value
+
+    record = {key: value for key, value in record.items() if value is not None}
+    record["venue"] = {key: value for key, value in venue.items() if value is not None}
+    return record
 
 
-def allevents_page(*records: str) -> str:
+def allevents_page(*records: dict) -> str:
+    """Embed records the way Allevents listing pages do."""
+
     return html_page(
-        "<script>window.allevents_data = [",
-        ",\n".join(records),
-        "];</script>",
+        "<script>",
+        "var _this = this;",
+        "_this.events_data = [];",
+        f"_this.events_data = {json.dumps(records)};",
+        "_this.events_data_with_ads = [];",
+        "</script>",
     )
 
 
@@ -170,6 +184,16 @@ def extract_single_allevents(page_url: str | None = ALLEVENTS_LISTING_URL, **ove
 @pytest.fixture(scope="module")
 def sample_page_html() -> str:
     return SAMPLE_PAGE_PATH.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def allevents_finnish_page() -> str:
+    return ALLEVENTS_JYVASKYLA_PATH.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def allevents_foreign_page() -> str:
+    return ALLEVENTS_ULVERSTONE_PATH.read_text(encoding="utf-8")
 
 
 # --- decode ------------------------------------------------------------------
@@ -857,14 +881,195 @@ def test_extract_allevents_missing_coordinates_are_none():
     assert (location["latitude"], location["longitude"]) == (None, None)
 
 
-def test_extract_allevents_decodes_escaped_text():
-    result = extract_single_allevents(eventname="Jyväskylä Sinfonia", location="Paviljonki")
+def test_extract_allevents_decodes_json_escapes_and_html_ampersands():
+    # allevents_page() serializes with json.dumps, so "ä" and "\n" are
+    # embedded as JSON escapes, as on real pages.
+    result = extract_single_allevents(
+        eventname="Jyväskylä Sinfonia &amp; Friends",
+        short_description="Line one\nLine two",
+    )
 
-    assert result["name"] == "Jyväskylä Sinfonia"
+    assert result["name"] == "Jyväskylä Sinfonia & Friends"
+    assert result["description"] == "Line one Line two"
+
+
+def test_extract_allevents_reads_fields_from_record_or_venue():
+    record = allevents_record(city=None)
+    record["city"] = "Joutsa (top level)"
+
+    results = extract_allevents(allevents_page(record), None)
+
+    assert results[0]["location"]["city"] == "Joutsa (top level)"
+    assert results[0]["location"]["address"] == "Jousitie 1"
+
+
+def test_extract_allevents_ignores_non_text_values():
+    record = allevents_record()
+    record["location"] = {"name": "Joutsa-talo"}
+
+    result = extract_allevents(allevents_page(record), None)[0]
+
+    assert result["location"]["venue"] is None
 
 
 def test_extract_allevents_without_records_returns_empty():
     assert extract_allevents(html_page("<p>allevents</p>"), ALLEVENTS_LISTING_URL) == []
+
+
+def test_extract_allevents_skips_truncated_record_and_keeps_earlier_ones():
+    # n8n can truncate large pages mid-record.
+    html = allevents_page(
+        allevents_record(event_id="1", eventname="Complete"),
+        allevents_record(event_id="2", eventname="Truncated"),
+    )
+    truncated = html[: html.index('"Truncated"') + 5]
+
+    assert [event["eventId"] for event in extract_allevents(truncated, None)] == ["1"]
+
+
+def test_extract_allevents_does_not_read_fields_outside_records():
+    # Real pages contain other "city"/"country" keys after the event array;
+    # a record missing a field must not pick them up.
+    html = allevents_page(allevents_record(city=None, country=None)) + html_page(
+        '<script>var user = {"city": "Stockholm", "country": "Sweden"};</script>'
+    )
+
+    results = extract_allevents(html, None)
+
+    assert len(results) == 1
+    assert results[0]["location"]["city"] is None
+
+
+def test_iter_allevents_records_skips_records_nested_in_records():
+    outer = allevents_record(event_id="outer")
+    outer["related"] = [allevents_record(event_id="inner")]
+
+    records = list(iter_allevents_records(allevents_page(outer)))
+
+    assert [record["event_id"] for record in records] == ["outer"]
+
+
+# --- extract_allevents: real listing pages -----------------------------------
+# Real Allevents pages captured from the n8n "Fetch Event Pages" step.
+
+ALLEVENTS_JYVASKYLA_EVENT_IDS = [
+    "200030164959422",
+    "200030054049339",
+    "200030065813440",
+    "200030043857648",
+    "200030663377953",
+    "3300029317070023",
+    "200030458239801",
+    "3300030141202431",
+    "3300029946165308",
+    "200029926001807",
+    "200030040726140",
+    "200030583736415",
+    "3300030135128233",
+    "200030663377847",
+    "3300030169158008",
+]
+
+EXPECTED_EVENT_KEYS = {
+    "name",
+    "startDate",
+    "endDate",
+    "time",
+    "price",
+    "location",
+    "description",
+    "url",
+    "sourceUrls",
+    "sourceType",
+    "eventId",
+}
+
+EXPECTED_LOCATION_KEYS = {"venue", "city", "address", "latitude", "longitude"}
+
+
+def test_real_allevents_page_extracts_all_finnish_events(allevents_finnish_page):
+    results = extract_allevents(allevents_finnish_page, ALLEVENTS_JYVASKYLA_URL)
+
+    assert [event["eventId"] for event in results] == ALLEVENTS_JYVASKYLA_EVENT_IDS
+    for event in results:
+        assert set(event) == EXPECTED_EVENT_KEYS
+        assert set(event["location"]) == EXPECTED_LOCATION_KEYS
+        assert event["sourceType"] == "allevents"
+        assert event["name"]
+        assert event["startDate"] == event["endDate"]
+        assert event["location"]["city"] == "Jyväskylä"
+        assert isinstance(event["location"]["latitude"], float)
+        assert isinstance(event["location"]["longitude"], float)
+
+
+def test_real_allevents_page_records_do_not_mix_fields(allevents_finnish_page):
+    results = extract_allevents(allevents_finnish_page, ALLEVENTS_JYVASKYLA_URL)
+
+    # Each event URL ends with that record's own event id.
+    assert all(event["url"].endswith(event["eventId"]) for event in results)
+    assert all(event["sourceUrls"] == [event["url"]] for event in results)
+    assert len({event["name"] for event in results}) == len(results)
+
+
+def test_real_allevents_page_first_and_last_records(allevents_finnish_page):
+    results = extract_allevents(allevents_finnish_page, ALLEVENTS_JYVASKYLA_URL)
+
+    first_url = (
+        "https://allevents.in/jyv%C3%A4skyl%C3%A4/"
+        "lost-society-x-hokka-miseria-is-a-state-of-mind-special-guest-st-aurora-lutakko/"
+        "200030164959422"
+    )
+    assert results[0] == {
+        "name": "Lost Society x HOKKA - Miseria is a State of Mind + special guest: St. Aurora / Lutakko",
+        "startDate": "2026-09-26",
+        "endDate": "2026-09-26",
+        "time": "19:00",
+        "price": None,
+        "location": {
+            "venue": "Lutakonaukio 3, 40100 Jyväskylä, Finland",
+            "city": "Jyväskylä",
+            "address": "Lutakonaukio 3, FI-40100 Jyväskylä, Suomi",
+            "latitude": 62.239262,
+            "longitude": 25.75432,
+        },
+        "description": (
+            "La 26.9.2026 LOST SOCIETY x HOKKA - Miseria Is A State Of Mind @ Lutakko "
+            "+ special guest: St. Aurora Ovet klo 19:00, soittoajat: www.jelmu.net "
+            "Ei ikärajaa / Rajattu anniskelualue K18 Ennakkoliput 37,40€ jelmu.net "
+            "(Jelmun jäsenet 35,40€), alk. 39,90€ lippu"
+        ),
+        "url": first_url,
+        "sourceUrls": [first_url],
+        "sourceType": "allevents",
+        "eventId": "200030164959422",
+    }
+
+    # The last record is followed by the rest of the page, which contains
+    # other "city"/"country" keys; its fields must still come from itself.
+    last = results[-1]
+    assert last["name"] == "Eläkeläiset, Steve ´n´ Seagulls in Laukaa"
+    assert (last["startDate"], last["time"]) == ("2026-11-20", "21:00")
+    assert last["location"] == {
+        "venue": "PEURUNKA AREENA",
+        "city": "Jyväskylä",
+        "address": "PEURUNKA AREENA, Jyväskylä, LS, Finland",
+        "latitude": 62.233002,
+        "longitude": 25.733,
+    }
+
+
+def test_real_foreign_allevents_page_records_are_detected_but_skipped(allevents_foreign_page):
+    records = list(iter_allevents_records(allevents_foreign_page))
+
+    assert len(records) == 11
+    assert {record["venue"]["country"] for record in records} == {"Australia"}
+    assert extract_allevents(allevents_foreign_page, None) == []
+
+
+def test_real_allevents_page_through_extract_event_data(allevents_finnish_page):
+    results = extract_event_data(allevents_finnish_page, ALLEVENTS_JYVASKYLA_URL)
+
+    assert [event["eventId"] for event in results] == ALLEVENTS_JYVASKYLA_EVENT_IDS
 
 
 # --- extract_event_data ------------------------------------------------------
@@ -880,9 +1085,9 @@ def test_extract_event_data_jsonld_only():
 
 
 def test_extract_event_data_runs_allevents_only_when_page_mentions_allevents():
-    record = allevents_record(event_url=None)
-    without_marker = html_page(f"<script>var data = [{record}];</script>")
-    with_marker = html_page(f"<script>var allEvents = [{record}];</script>")
+    records = json.dumps([allevents_record(event_url=None)])
+    without_marker = html_page(f"<script>var data = {records};</script>")
+    with_marker = html_page(f"<script>var allEvents = {records};</script>")
 
     assert extract_event_data(without_marker, None) == []
     assert [event["sourceType"] for event in extract_event_data(with_marker, None)] == ["allevents"]
@@ -928,32 +1133,32 @@ def test_extract_event_data_sample_page(sample_page_html):
 # issues becomes a deliberate, visible test change.
 
 
-PLAIN_ALLEVENTS_JSON = json.dumps(
-    [{key: ALLEVENTS_FIELDS[key] for key in ("event_id", "eventname", "start_time_display", "city")}]
-)
+def test_allevents_records_inside_json_strings_are_not_detected():
+    # Known limitation: records embedded in a JSON-encoded string
+    # (e.g. JSON.parse("[{\"event_id\": ...}]")) are not decoded. This format
+    # has not been observed on real Allevents pages.
+    encoded = json.dumps(json.dumps([allevents_record()]))
+    html = html_page(f"<script>window.allevents = JSON.parse({encoded});</script>")
+
+    assert extract_allevents(html, ALLEVENTS_LISTING_URL) == []
 
 
-@pytest.mark.parametrize(
-    "script_body",
-    [
-        pytest.param(f"window.allevents = {PLAIN_ALLEVENTS_JSON};", id="plain-json"),
-        pytest.param(f"window.allevents = JSON.parse({json.dumps(PLAIN_ALLEVENTS_JSON)});", id="escaped-json"),
-    ],
-)
-def test_allevents_extraction_finds_nothing_in_plain_or_escaped_json(script_body):
-    # Known issue: the record-locating regex requires escaped quotes while
-    # get_field() requires unescaped quotes, so neither real-world format
-    # produces events.
-    assert extract_allevents(html_page(f"<script>{script_body}</script>"), ALLEVENTS_LISTING_URL) == []
+def test_allevents_numeric_coordinates_are_ignored():
+    # Known issue: only string values are read, so numeric coordinates are
+    # dropped. Real pages currently use strings.
+    location = extract_single_allevents(latitude=61.7417, longitude=26.1142)["location"]
+
+    assert (location["latitude"], location["longitude"]) == (None, None)
 
 
 def test_get_field_does_not_read_escaped_json():
-    # Known issue: see above.
+    # Known limitation: get_field() only reads unescaped quotes. It is no
+    # longer used by extract_allevents().
     assert get_field(r'{\"city\":\"Joutsa\"}', "city") is None
 
 
 def test_get_field_does_not_read_unquoted_values():
-    # Known issue: numeric Allevents values (e.g. coordinates) are ignored.
+    # Known limitation: get_field() only reads quoted string values.
     assert get_field('{"latitude": 61.7417}', "latitude") is None
 
 
@@ -1051,13 +1256,6 @@ def test_impossible_dates_are_accepted(function, value, expected):
 )
 def test_decode_leaves_other_entities_and_escapes(value, expected):
     assert decode(value) == expected
-
-
-def test_allevents_description_keeps_escaped_newlines():
-    # Known issue: consequence of decode() not handling "\n" escapes.
-    result = extract_single_allevents(short_description="Line one\nLine two")
-
-    assert result["description"] == r"Line one\nLine two"
 
 
 def test_sample_page_prices_are_all_missing(sample_page_html):

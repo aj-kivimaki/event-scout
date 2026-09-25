@@ -1,0 +1,649 @@
+{
+  "name": "Weekly Event Scout",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        256
+      ],
+      "id": "2abffcb4-727a-4481-9702-a5027439d989",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/.n8n-files/config/events.yaml",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        -256,
+        144
+      ],
+      "id": "5e49d85a-0ebf-4aed-8cd6-8c4a0a489001",
+      "name": "Read Config File"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -32,
+        144
+      ],
+      "id": "16d92351-03d5-47f9-be3f-4d7148e3ce25",
+      "name": "Extract Config Text"
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = [];\n\nfor (const item of $input.all()) {\n  const query = item.json.query;\n  const results = item.json.results || [];\n\n  for (const result of results) {\n    output.push({\n      json: {\n        source_query: query,\n        url: result.url,\n        title: result.title,\n        content: result.content,\n        score: result.score,\n      },\n    });\n  }\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        144
+      ],
+      "id": "cef8a1ac-04d1-4c45-8320-3ae73757e378",
+      "name": "Flatten Search Results"
+    },
+    {
+      "parameters": {
+        "jsCode": "const seen = new Set();\nconst output = [];\n\nfor (const item of $input.all()) {\n  const url = item.json.url;\n\n  if (!url || seen.has(url)) {\n    continue;\n  }\n\n  seen.add(url);\n\n  output.push({\n    json: item.json,\n  });\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        144
+      ],
+      "id": "2ba5274c-af0b-4f33-ae7b-24efa97bbc4a",
+      "name": "Deduplicate URLs"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.query }}"
+            },
+            {
+              "name": "search_depth",
+              "value": "basic"
+            },
+            {
+              "name": "max_results",
+              "value": "5"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        640,
+        144
+      ],
+      "id": "bbc0c93d-f0ce-41d0-bafe-3c7f94259e3e",
+      "name": "Search Web — Tavily",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "y4EI41uCtEXVJee5",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1760,
+        144
+      ],
+      "id": "6a2cb1a1-8d12-498b-a65f-9143a2defcca",
+      "name": "Fetch Event Pages",
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const events = $input.all();\n\nreturn events.map(item => {\n  const event = item.json;\n\n  return {\n    json: {\n      name: event.name,\n      date: event.startDate?.slice(0, 10) ?? null,\n      time: event.time || event.startDate?.slice(11, 16) || null,\n      price: event.price ?? null,\n\n      venue: event.location?.venue ?? null,\n      city: event.location?.city ?? null,\n      address: event.location?.address ?? null,\n\n      distanceKm: event.distanceKm ?? null,\n\n      description: event.description ?? null,\n\n      sourceUrls: event.sourceUrls ?? [],\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        416
+      ],
+      "id": "174d7a21-f791-404a-80d6-58150b8327a0",
+      "name": "Prepare Event Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const events = $input.all().map(item => item.json);\n\n// Production: use Build Search Context.\n// Test: fall back to the current fixture range.\nlet START_DATE = '2026-09-28';\nlet LOOKAHEAD_WEEKS = 3;\n\ntry {\n  const context = $('Python — Build Search Context').first().json;\n\n  if (context.start_date) {\n    START_DATE = context.start_date;\n  }\n\n  if (context.config?.lookahead_weeks) {\n    LOOKAHEAD_WEEKS =\n      Number(context.config.lookahead_weeks);\n  }\n} catch {\n  // Build Search Context was not executed.\n  // Use the test values above.\n}\n\nfunction addDays(dateString, days) {\n  const date = new Date(\n    `${dateString}T00:00:00`\n  );\n\n  date.setDate(\n    date.getDate() + days\n  );\n\n  return date.toISOString().slice(0, 10);\n}\n\nconst weeks = [];\n\nfor (\n  let i = 0;\n  i < LOOKAHEAD_WEEKS;\n  i++\n) {\n  const weekStart =\n    addDays(\n      START_DATE,\n      i * 7\n    );\n\n  const weekEnd =\n    addDays(\n      weekStart,\n      6\n    );\n\n  weeks.push({\n    weekStart,\n    weekEnd,\n    events: [],\n  });\n}\n\nfor (const event of events) {\n  if (!event.date) {\n    continue;\n  }\n\n  const week =\n    weeks.find(week =>\n      event.date >= week.weekStart &&\n      event.date <= week.weekEnd\n    );\n\n  if (week) {\n    week.events.push(event);\n  }\n}\n\nfor (const week of weeks) {\n  week.events.sort((a, b) => {\n    return `${a.date} ${a.time ?? ''}`\n      .localeCompare(\n        `${b.date} ${b.time ?? ''}`\n      );\n  });\n}\n\nreturn weeks.map(week => ({\n  json: week,\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        416
+      ],
+      "id": "d0d13220-f0c4-4491-9a5c-9defe72911c3",
+      "name": "Group Events by Week"
+    },
+    {
+      "parameters": {
+        "jsCode": "const weeks = $input.all().map(item => item.json);\n\nfunction formatDate(dateString) {\n  const date = new Date(`${dateString}T00:00:00`);\n\n  return new Intl.DateTimeFormat('fi-FI', {\n    day: 'numeric',\n    month: 'numeric',\n  }).format(date);\n}\n\nfunction getWeekday(dateString) {\n  const date = new Date(`${dateString}T00:00:00`);\n\n  return new Intl.DateTimeFormat('fi-FI', {\n    weekday: 'short',\n  }).format(date);\n}\n\nfunction normalizeCity(city) {\n  const cities = {\n    Jyvaskyla: 'Jyväskylä',\n    Jamsa: 'Jämsä',\n    Aanekoski: 'Äänekoski',\n    Maentyharju: 'Mäntyharju',\n    Pieksamaki: 'Pieksämäki',\n    Sysma: 'Sysmä',\n  };\n\n  return cities[city] ?? city;\n}\n\nlet html = `\n<!DOCTYPE html>\n<html lang=\"fi\">\n\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>Tapahtumat</title>\n</head>\n\n<body style=\"\n  font-family: Arial, sans-serif;\n  line-height: 1.4;\n  margin: 0;\n  padding: 14px;\n  box-sizing: border-box;\n\">\n`;\n\nfor (const week of weeks) {\n  html += `\n  <h2 style=\"\n    margin-top: 24px;\n    margin-bottom: 10px;\n  \">\n    ${formatDate(week.weekStart)}–${formatDate(week.weekEnd)}\n  </h2>\n\n  <table\n    cellpadding=\"8\"\n    cellspacing=\"0\"\n    style=\"\n      width: 100%;\n      max-width: 100%;\n      box-sizing: border-box;\n      border-collapse: collapse;\n      font-size: 14px;\n      margin-bottom: 28px;\n    \"\n  >\n    <thead>\n      <tr style=\"background-color: #f2f2f2;\">\n\n        <th style=\"\n          text-align: left;\n          border: 1px solid #ddd;\n          white-space: nowrap;\n        \">\n          Viikonpäivä\n        </th>\n\n        <th style=\"\n          text-align: left;\n          border: 1px solid #ddd;\n          white-space: nowrap;\n        \">\n          Päivä\n        </th>\n\n        <th style=\"\n          text-align: left;\n          border: 1px solid #ddd;\n          white-space: nowrap;\n        \">\n          Aika\n        </th>\n\n        <th style=\"\n          text-align: left;\n          border: 1px solid #ddd;\n        \">\n          Tapahtuma\n        </th>\n\n        <th style=\"\n          text-align: left;\n          border: 1px solid #ddd;\n        \">\n          Kaupunki\n        </th>\n\n        <th style=\"\n          text-align: left;\n          border: 1px solid #ddd;\n        \">\n          Paikka\n        </th>\n\n      </tr>\n    </thead>\n\n    <tbody>\n  `;\n\n  for (const event of week.events) {\n    const sourceUrl = event.sourceUrls?.[0];\n\n    html += `\n      <tr>\n\n        <td style=\"\n          border: 1px solid #ddd;\n          white-space: nowrap;\n        \">\n          ${getWeekday(event.date)}\n        </td>\n\n        <td style=\"\n          border: 1px solid #ddd;\n          white-space: nowrap;\n        \">\n          ${formatDate(event.date)}\n        </td>\n\n        <td style=\"\n          border: 1px solid #ddd;\n          white-space: nowrap;\n        \">\n          ${event.time || '—'}\n        </td>\n\n        <td style=\"\n          border: 1px solid #ddd;\n        \">\n          ${\n            sourceUrl\n              ? `<a href=\"${sourceUrl}\">${event.name}</a>`\n              : event.name\n          }\n        </td>\n\n        <td style=\"\n          border: 1px solid #ddd;\n        \">\n          ${normalizeCity(event.city) || '—'}\n        </td>\n\n        <td style=\"\n          border: 1px solid #ddd;\n        \">\n          ${event.venue || '—'}\n        </td>\n\n      </tr>\n    `;\n  }\n\n  html += `\n    </tbody>\n  </table>\n  `;\n}\n\nhtml += `\n</body>\n</html>\n`;\n\nreturn [\n  {\n    json: {\n      subject: 'Tapahtumat – seuraavat 3 viikkoa',\n      html,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        416
+      ],
+      "id": "896e1aa9-b62e-4067-b77b-23a8253100b0",
+      "name": "Build Email HTML"
+    },
+    {
+      "parameters": {
+        "sendTo": "aj.kivimaki@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1776,
+        416
+      ],
+      "id": "0950e318-bd22-4b10-b868-747effafc03c",
+      "name": "Send a message",
+      "webhookId": "895c2931-499d-4ca4-a2de-39e3b091f01e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "L4qDldMT6YyHE1x7",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const blockedDomains = [\n  'concerts50.com',\n];\n\nconst blockedPathPatterns = [\n  /\\/events\\/?$/i,\n  /\\/event\\/?$/i,\n  /\\/concerts\\/?$/i,\n  /\\/comedy\\/?$/i,\n  /\\/stand-up\\/?$/i,\n  /\\/festivals\\/?$/i,\n  /\\/festivals?\\/?$/i,\n  /\\/venues?\\/?$/i,\n  /\\/clubs\\/?$/i,\n  /\\/nightlife/i,\n  /\\/city-[^/]+$/i,\n];\n\nreturn $input.all().filter(item => {\n  const url = String(item.json.url ?? '').toLowerCase();\n\n  if (!url) {\n    return false;\n  }\n\n  if (blockedDomains.some(domain => url.includes(domain))) {\n    return false;\n  }\n\n  if (blockedPathPatterns.some(pattern => pattern.test(url))) {\n    return false;\n  }\n\n  return true;\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        144
+      ],
+      "id": "b040b3f0-af5b-48e8-803a-40c0157cd658",
+      "name": "Filter Event URLs"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -240,
+        416
+      ],
+      "id": "ee7989cc-a283-4c82-a22f-ad34c62f26dd",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/.n8n-files/config/test-event-page.html",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        -464,
+        416
+      ],
+      "id": "6b6da80b-56af-4a8c-8c55-e6508e2a9c18",
+      "name": "Read Test Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map((item, index) => ({\n  json: {\n    ...item.json,\n    fetchIndex: index,\n  },\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        144
+      ],
+      "id": "e9fc9e98-70a6-4f9c-a4c6-fa3f5b849663",
+      "name": "Add Fetch Index"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://python-api:8000/search/context",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "yaml_text",
+              "value": "={{ $json.data }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        192,
+        144
+      ],
+      "id": "0a3f5d1c-1eb0-47b1-9de5-1378cf151568",
+      "name": "Python — Build Search Context"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://python-api:8000/search/queries",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "yaml_text",
+              "value": "={{ $('Extract Config Text').item.json.data }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        416,
+        144
+      ],
+      "id": "de88402f-d16e-45ba-9c94-ba676c293e85",
+      "name": "Python — Generate Search Queries"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://python-api:8000/events/extract",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "html",
+              "value": "={{ $json.data }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -16,
+        416
+      ],
+      "id": "4b6286c5-83d4-4a28-a21c-b48bad970d50",
+      "name": "Python — Extract Event Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://python-api:8000/events/location",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "event",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        432,
+        416
+      ],
+      "id": "fc5538ce-aff2-4378-ad51-8116e7488a06",
+      "name": "Python — Resolve Event Locations"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://python-api:8000/events/filter-radius",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  events: $input.all().map(item => item.json),\n  center_lat: $if(\n    $(\"Python — Build Search Context\").isExecuted,\n    Number($(\"Python — Build Search Context\").first().json.config.center.latitude),\n    61.742667\n  ),\n  center_lon: $if(\n    $(\"Python — Build Search Context\").isExecuted,\n    Number($(\"Python — Build Search Context\").first().json.config.center.longitude),\n    26.112972\n  ),\n  radius_km: $if(\n    $(\"Python — Build Search Context\").isExecuted,\n    Number($(\"Python — Build Search Context\").first().json.config.radius_km),\n    100\n  )\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        656,
+        416
+      ],
+      "id": "f961e3bd-8dc8-4d1b-994c-de199f48ba8e",
+      "name": "Python — Filter Events by Radius",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://python-api:8000/events/deduplicate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  events: $input.all().map(item => item.json)\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        880,
+        416
+      ],
+      "id": "ecddee05-4e2a-4e04-b032-e723f4d7d399",
+      "name": "Python — Deduplicate Events",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://python-api:8000/events/filter-date",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  events: $input.all().map(item => item.json),\n  start_date: $if(\n    $(\"Python — Build Search Context\").isExecuted,\n    $(\"Python — Build Search Context\").first().json.start_date,\n    \"2026-09-28\"\n  ),\n  end_date: $if(\n    $(\"Python — Build Search Context\").isExecuted,\n    $(\"Python — Build Search Context\").first().json.end_date,\n    \"2026-10-18\"\n  )\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        416
+      ],
+      "id": "5633e33b-3dba-49f1-abea-8fb6de0f6861",
+      "name": "Python — Filter Events by Date",
+      "executeOnce": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Test Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Config File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Config File": {
+      "main": [
+        [
+          {
+            "node": "Extract Config Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Config Text": {
+      "main": [
+        [
+          {
+            "node": "Python — Build Search Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Search Results": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Web — Tavily": {
+      "main": [
+        [
+          {
+            "node": "Flatten Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplicate URLs": {
+      "main": [
+        [
+          {
+            "node": "Filter Event URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Event Pages": {
+      "main": [
+        [
+          {
+            "node": "Python — Extract Event Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Event Data": {
+      "main": [
+        [
+          {
+            "node": "Group Events by Week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Group Events by Week": {
+      "main": [
+        [
+          {
+            "node": "Build Email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email HTML": {
+      "main": [
+        []
+      ]
+    },
+    "Filter Event URLs": {
+      "main": [
+        [
+          {
+            "node": "Add Fetch Index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Python — Extract Event Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Test Data": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Fetch Index": {
+      "main": [
+        [
+          {
+            "node": "Fetch Event Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Build Search Context": {
+      "main": [
+        [
+          {
+            "node": "Python — Generate Search Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Generate Search Queries": {
+      "main": [
+        []
+      ]
+    },
+    "Python — Extract Event Data": {
+      "main": [
+        [
+          {
+            "node": "Python — Filter Events by Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Resolve Event Locations": {
+      "main": [
+        [
+          {
+            "node": "Python — Filter Events by Radius",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Filter Events by Radius": {
+      "main": [
+        [
+          {
+            "node": "Python — Deduplicate Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Deduplicate Events": {
+      "main": [
+        [
+          {
+            "node": "Prepare Event Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Filter Events by Date": {
+      "main": [
+        [
+          {
+            "node": "Python — Resolve Event Locations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "9f1af9ac-164c-43bb-aa06-22f3ec78ceab",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "df8efe87da1059a7e2e71982f3b685e8522d7f4754a73ec1425db9b72cd0792c"
+  },
+  "nodeGroups": [],
+  "id": "tiUvIB9uqiUgTL6L",
+  "tags": []
+}

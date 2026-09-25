@@ -501,6 +501,83 @@ def test_filter_date_empty_events(client):
     assert response.json() == []
 
 
+
+def test_filter_date_passes_iso_dates_to_domain_unchanged(client):
+    events = [
+        {"name": "First day", "startDate": "2026-09-28"},
+        {"name": "Last day", "startDate": "2026-10-18T23:00:00"},
+        {"name": "Day after", "startDate": "2026-10-19"},
+    ]
+
+    response = client.post(
+        "/events/filter-date",
+        json={"events": events, "start_date": START_DATE, "end_date": END_DATE},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == filter_events_by_date(events, START_DATE, END_DATE)
+    assert [event["name"] for event in response.json()] == ["First day", "Last day"]
+
+
+def test_filter_date_accepts_equal_start_and_end(client):
+    events = [
+        {"name": "That day", "startDate": "2026-10-01T19:00:00"},
+        {"name": "Next day", "startDate": "2026-10-02"},
+    ]
+
+    response = client.post(
+        "/events/filter-date",
+        json={"events": events, "start_date": "2026-10-01", "end_date": "2026-10-01"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [{"name": "That day", "startDate": "2026-10-01T19:00:00"}]
+
+
+@pytest.mark.parametrize(
+    ("start_date", "end_date", "invalid_fields"),
+    [
+        pytest.param("next monday", END_DATE, ["start_date"], id="not-a-date"),
+        pytest.param("28.9.2026", "18.10.2026", ["start_date", "end_date"], id="finnish-format"),
+        pytest.param(START_DATE, "2026-02-30", ["end_date"], id="impossible-date"),
+    ],
+)
+def test_filter_date_rejects_invalid_dates(client, start_date, end_date, invalid_fields):
+    events = [{"name": "Inside", "startDate": "2026-10-01"}]
+
+    response = client.post(
+        "/events/filter-date",
+        json={"events": events, "start_date": start_date, "end_date": end_date},
+    )
+
+    assert response.status_code == 422
+    assert validation_errors(response) == {
+        ("date_from_datetime_parsing", ("body", field))
+        for field in invalid_fields
+    }
+
+
+def test_filter_date_rejects_reversed_range(client):
+    body = {
+        "events": [{"name": "Inside", "startDate": "2026-10-01"}],
+        "start_date": END_DATE,
+        "end_date": START_DATE,
+    }
+
+    response = client.post("/events/filter-date", json=body)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": [
+            {
+                "type": "date_range_order",
+                "loc": ["body"],
+                "msg": "start_date must be on or before end_date",
+                "input": body,
+            }
+        ]
+    }
+
 # --- POST /events/deduplicate ------------------------------------------------
 
 
@@ -551,7 +628,7 @@ def test_deduplicate_empty_events(client):
         ("/events/extract", {"html": None}, "string_type", ("body", "html")),
         ("/events/location", {"event": None}, "dict_type", ("body", "event")),
         ("/events/filter-radius", {"events": [], **JOUTSA, "radius_km": None}, "float_type", ("body", "radius_km")),
-        ("/events/filter-date", {"events": [], "start_date": None, "end_date": END_DATE}, "string_type", ("body", "start_date")),
+        ("/events/filter-date", {"events": [], "start_date": None, "end_date": END_DATE}, "date_type", ("body", "start_date")),
         ("/events/deduplicate", {"events": None}, "list_type", ("body", "events")),
         # Wrong types
         ("/config/parse", {"yaml_text": 123}, "string_type", ("body", "yaml_text")),
@@ -562,7 +639,7 @@ def test_deduplicate_empty_events(client):
         ("/events/filter-radius", {"events": [], **JOUTSA, "radius_km": "far"}, "float_parsing", ("body", "radius_km")),
         ("/events/filter-radius", {"events": {"a": 1}, **JOUTSA, "radius_km": 100}, "list_type", ("body", "events")),
         ("/events/filter-radius", {"events": ["x"], **JOUTSA, "radius_km": 100}, "dict_type", ("body", "events", 0)),
-        ("/events/filter-date", {"events": [], "start_date": 20260928, "end_date": END_DATE}, "string_type", ("body", "start_date")),
+        ("/events/filter-date", {"events": [], "start_date": 20260928, "end_date": END_DATE}, "date_from_datetime_inexact", ("body", "start_date")),
         ("/events/deduplicate", {"events": [1]}, "dict_type", ("body", "events", 0)),
     ],
 )
@@ -1597,28 +1674,6 @@ def test_ordinary_validation_error_body_is_unchanged(client):
 # These tests document the existing API contract, including behavior that is
 # probably wrong. They are intentionally explicit so that fixing any of these
 # issues becomes a deliberate, visible test change.
-
-@pytest.mark.parametrize(
-    ("start_date", "end_date"),
-    [
-        # Known issue: start_date/end_date are plain strings compared
-        # lexicographically; they are never parsed or checked for order.
-        pytest.param("next monday", "later", id="not-dates"),
-        pytest.param("28.9.2026", "18.10.2026", id="finnish-format"),
-        pytest.param(END_DATE, START_DATE, id="reversed"),
-    ],
-)
-def test_filter_date_accepts_invalid_date_strings(client, start_date, end_date):
-    events = [{"name": "Inside", "startDate": "2026-10-01"}]
-
-    response = client.post(
-        "/events/filter-date",
-        json={"events": events, "start_date": start_date, "end_date": end_date},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == []
-
 
 def test_extract_without_page_url_leaves_events_without_source(client):
     # Known issue (n8n contract): the workflow posts only {"html": ...}, so

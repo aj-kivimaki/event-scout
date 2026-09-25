@@ -2,12 +2,20 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
+from datetime import date
 from typing import Annotated
 
 import yaml
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from src.config.parser import parse_config
 from src.event_digest.dates import (
@@ -68,8 +76,19 @@ class RadiusFilterRequest(BaseModel):
 
 class DateFilterRequest(BaseModel):
     events: list[dict]
-    start_date: str
-    end_date: str
+    start_date: date
+    end_date: date
+
+    @model_validator(mode="after")
+    def check_date_order(self) -> "DateFilterRequest":
+        # A reversed range would silently match no events.
+        if self.start_date > self.end_date:
+            raise PydanticCustomError(
+                "date_range_order",
+                "start_date must be on or before end_date",
+            )
+
+        return self
 
 
 class DeduplicationRequest(BaseModel):
@@ -278,8 +297,8 @@ def filter_events_date_endpoint(
 ):
     return filter_events_by_date(
         events=validate_events(request.events),
-        start_date=request.start_date,
-        end_date=request.end_date,
+        start_date=request.start_date.isoformat(),
+        end_date=request.end_date.isoformat(),
     )
 
 

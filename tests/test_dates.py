@@ -7,6 +7,7 @@ from src.event_digest.dates import (
     calculate_date_range,
     extract_occurrence_dates,
     filter_events_by_date,
+    max_lookahead_weeks,
 )
 
 # Three-week range starting Monday 2026-09-28 and ending Sunday 2026-10-18.
@@ -80,6 +81,33 @@ def test_calculate_date_range_defaults_to_current_helsinki_date():
         3,
         today=helsinki_today,
     )
+
+
+# --- max_lookahead_weeks -----------------------------------------------------
+
+
+def test_max_lookahead_weeks_is_largest_range_that_fits_in_a_date():
+    today = date(2026, 9, 25)
+
+    max_weeks = max_lookahead_weeks(today=today)
+
+    assert max_weeks == 416024
+    assert calculate_date_range(max_weeks, today=today) == (date(2026, 9, 28), date(9999, 12, 26))
+    with pytest.raises(OverflowError):
+        calculate_date_range(max_weeks + 1, today=today)
+
+
+def test_max_lookahead_weeks_depends_on_start_date():
+    this_week = max_lookahead_weeks(today=date(2026, 9, 25))
+    next_week = max_lookahead_weeks(today=date(2026, 10, 2))
+
+    assert next_week == this_week - 1
+
+
+def test_max_lookahead_weeks_defaults_to_current_helsinki_date():
+    helsinki_today = datetime.now(HELSINKI).date()
+
+    assert max_lookahead_weeks() == max_lookahead_weeks(today=helsinki_today)
 
 
 # --- filter_events_by_date: events inside the range ---------------------------

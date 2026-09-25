@@ -15,8 +15,9 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+from src.config import schema
 from src.event_digest import api, search_context
-from src.event_digest.dates import calculate_date_range, filter_events_by_date
+from src.event_digest.dates import calculate_date_range, filter_events_by_date, max_lookahead_weeks
 from src.event_digest.deduplication import deduplicate_events
 from src.event_digest.extraction import extract_event_data
 from src.event_digest.locations import filter_events_by_radius, resolve_event_location
@@ -28,6 +29,8 @@ ALLEVENTS_PAGE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "allevents-jyvaskyla
 FIXED_TODAY = date(2026, 9, 25)
 START_DATE = "2026-09-28"
 END_DATE = "2026-10-18"
+# Largest lookahead whose end date fits before date.max from START_DATE.
+MAX_LOOKAHEAD_WEEKS = 416024
 
 CONFIG_YAML = """
 center:
@@ -81,9 +84,16 @@ def client() -> TestClient:
 def fixed_today(monkeypatch):
     """Pin 'today' for endpoints that calculate the search date range."""
 
-    pinned = partial(calculate_date_range, today=FIXED_TODAY)
-    monkeypatch.setattr(api, "calculate_date_range", pinned)
-    monkeypatch.setattr(search_context, "calculate_date_range", pinned)
+    pin_today(monkeypatch, FIXED_TODAY)
+
+
+def pin_today(monkeypatch, today: date) -> None:
+    pinned_range = partial(calculate_date_range, today=today)
+    pinned_max = partial(max_lookahead_weeks, today=today)
+    monkeypatch.setattr(api, "calculate_date_range", pinned_range)
+    monkeypatch.setattr(search_context, "calculate_date_range", pinned_range)
+    monkeypatch.setattr(api, "max_lookahead_weeks", pinned_max)
+    monkeypatch.setattr(schema, "max_lookahead_weeks", pinned_max)
 
 
 def jsonld_html(*events: dict) -> str:
@@ -575,6 +585,11 @@ def test_location_requires_event_wrapper(client):
         pytest.param({}, "missing", id="missing"),
         pytest.param({"lookahead_weeks": "abc"}, "int_parsing", id="not-integer"),
         pytest.param({"lookahead_weeks": "2.5"}, "int_parsing", id="fractional"),
+        pytest.param({"lookahead_weeks": 0}, "greater_than", id="zero"),
+        pytest.param({"lookahead_weeks": -1}, "greater_than", id="negative"),
+        pytest.param({"lookahead_weeks": MAX_LOOKAHEAD_WEEKS + 1}, "less_than_equal", id="past-max-date"),
+        pytest.param({"lookahead_weeks": 10**9}, "less_than_equal", id="timedelta-overflow"),
+        pytest.param({"lookahead_weeks": 10**30}, "less_than_equal", id="huge-integer"),
     ],
 )
 def test_dates_calculate_query_parameter_validation(client, params, error_type):
@@ -582,6 +597,58 @@ def test_dates_calculate_query_parameter_validation(client, params, error_type):
 
     assert response.status_code == 422
     assert (error_type, ("query", "lookahead_weeks")) in validation_errors(response)
+
+
+def test_dates_calculate_non_positive_error_details(client):
+    response = client.post("/dates/calculate", params={"lookahead_weeks": 0})
+
+    assert response.json() == {
+        "detail": [
+            {
+                "type": "greater_than",
+                "loc": ["query", "lookahead_weeks"],
+                "msg": "Input should be greater than 0",
+                "input": "0",
+                "ctx": {"gt": 0},
+            }
+        ]
+    }
+
+
+def test_dates_calculate_accepts_largest_representable_range(client):
+    # The upper bound is technical: the end date must not pass date.max
+    # (9999-12-31). With the pinned start date 2026-09-28 that is 416024 weeks.
+    response = client.post("/dates/calculate", params={"lookahead_weeks": MAX_LOOKAHEAD_WEEKS})
+
+    assert response.status_code == 200
+    assert response.json() == {"start_date": START_DATE, "end_date": "9999-12-26"}
+
+
+def test_dates_calculate_overflow_error_details(client):
+    response = client.post("/dates/calculate", params={"lookahead_weeks": MAX_LOOKAHEAD_WEEKS + 1})
+
+    assert response.json() == {
+        "detail": [
+            {
+                "type": "less_than_equal",
+                "loc": ["query", "lookahead_weeks"],
+                "msg": f"Input should be less than or equal to {MAX_LOOKAHEAD_WEEKS}",
+                "input": str(MAX_LOOKAHEAD_WEEKS + 1),
+                "ctx": {"le": MAX_LOOKAHEAD_WEEKS},
+            }
+        ]
+    }
+
+
+def test_dates_calculate_upper_bound_follows_start_date(client, monkeypatch):
+    # One week later, one week less fits before date.max.
+    pin_today(monkeypatch, date(2026, 10, 2))
+
+    at_old_max = client.post("/dates/calculate", params={"lookahead_weeks": MAX_LOOKAHEAD_WEEKS})
+    at_new_max = client.post("/dates/calculate", params={"lookahead_weeks": MAX_LOOKAHEAD_WEEKS - 1})
+
+    assert at_old_max.status_code == 422
+    assert at_new_max.status_code == 200
 
 
 def test_dates_calculate_ignores_json_body(client):
@@ -707,6 +774,21 @@ def error_details(response) -> list[dict]:
             id="weeks-zero",
         ),
         pytest.param(
+            config_yaml(lookahead_weeks=-1),
+            {("greater_than", (*YAML_TEXT, "lookahead_weeks"))},
+            id="weeks-negative",
+        ),
+        pytest.param(
+            config_yaml(lookahead_weeks=MAX_LOOKAHEAD_WEEKS + 1),
+            {("less_than_equal", (*YAML_TEXT, "lookahead_weeks"))},
+            id="weeks-past-max-date",
+        ),
+        pytest.param(
+            config_yaml(lookahead_weeks=10**9),
+            {("less_than_equal", (*YAML_TEXT, "lookahead_weeks"))},
+            id="weeks-huge",
+        ),
+        pytest.param(
             config_yaml(lookahead_weeks=2.5),
             {("int_from_float", (*YAML_TEXT, "lookahead_weeks"))},
             id="weeks-fractional",
@@ -773,6 +855,44 @@ def test_config_not_mapping_error_details(client):
             "msg": "Configuration must be a YAML mapping.",
         }
     ]
+
+
+def test_config_lookahead_overflow_error_details(client):
+    response = client.post("/config/parse", json={"yaml_text": config_yaml(lookahead_weeks=10**9)})
+
+    assert error_details(response) == [
+        {
+            "type": "less_than_equal",
+            "loc": ["body", "yaml_text", "lookahead_weeks"],
+            "msg": f"Input should be less than or equal to {MAX_LOOKAHEAD_WEEKS}",
+            "input": 10**9,
+            "ctx": {"le": MAX_LOOKAHEAD_WEEKS},
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("lookahead_weeks", "expected_end"),
+    [
+        pytest.param(1, "2026-10-04", id="one-week"),
+        pytest.param(3, END_DATE, id="three-weeks"),
+        pytest.param(MAX_LOOKAHEAD_WEEKS, "9999-12-26", id="largest-representable"),
+    ],
+)
+def test_config_valid_lookahead_weeks(client, lookahead_weeks, expected_end):
+    yaml_text = config_yaml(lookahead_weeks=lookahead_weeks)
+
+    parsed = client.post("/config/parse", json={"yaml_text": yaml_text})
+    context = client.post("/search/context", json={"yaml_text": yaml_text})
+    queries = client.post("/search/queries", json={"yaml_text": yaml_text})
+
+    assert parsed.status_code == 200
+    assert parsed.json()["lookahead_weeks"] == lookahead_weeks
+    assert context.status_code == 200
+    assert (context.json()["start_date"], context.json()["end_date"]) == (START_DATE, expected_end)
+    assert queries.status_code == 200
+    assert len(queries.json()) == 154
+    assert {(query["start_date"], query["end_date"]) for query in queries.json()} == {(START_DATE, expected_end)}
 
 
 def test_config_error_with_yaml_specific_values_is_serializable(client):
@@ -1086,36 +1206,6 @@ def test_deduplicate_duplicate_with_none_location(client):
 # These tests document the existing API contract, including behavior that is
 # probably wrong. They are intentionally explicit so that fixing any of these
 # issues becomes a deliberate, visible test change.
-
-def test_config_with_huge_lookahead_weeks_returns_500(client):
-    # Known issue: lookahead_weeks has no upper bound in the config schema;
-    # the date calculation overflows (OverflowError) after validation passes.
-    yaml_text = config_yaml(lookahead_weeks=10**9)
-
-    response = client.post("/search/context", json={"yaml_text": yaml_text})
-
-    assert response.status_code == 500
-
-
-@pytest.mark.parametrize(
-    ("lookahead_weeks", "expected_end"),
-    [(0, "2026-09-27"), (-2, "2026-09-13")],
-)
-def test_dates_calculate_accepts_non_positive_weeks(client, lookahead_weeks, expected_end):
-    # Known issue: unlike the config schema (lookahead_weeks > 0), the query
-    # parameter is unconstrained, producing an end date before the start date.
-    response = client.post("/dates/calculate", params={"lookahead_weeks": lookahead_weeks})
-
-    assert response.status_code == 200
-    assert response.json() == {"start_date": START_DATE, "end_date": expected_end}
-
-
-def test_dates_calculate_huge_weeks_returns_500(client):
-    # Known issue: an unbounded integer overflows the date calculation.
-    response = client.post("/dates/calculate", params={"lookahead_weeks": 10**9})
-
-    assert response.status_code == 500
-
 
 @pytest.mark.parametrize(
     ("radius_km", "expected_names"),

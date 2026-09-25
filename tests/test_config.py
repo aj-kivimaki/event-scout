@@ -4,6 +4,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from src.config import schema
 from src.config.parser import parse_config
 from src.config.schema import EventScoutConfig
 
@@ -168,6 +169,31 @@ def test_parse_config_rejects_non_positive_numbers(field, value):
         parse_config(yaml.safe_dump(data))
 
     assert (field,) in error_locations(exc_info.value)
+
+
+def test_parse_config_rejects_lookahead_weeks_beyond_representable_dates():
+    data = valid_config_dict()
+    data["lookahead_weeks"] = 10**9
+
+    with pytest.raises(ValidationError) as exc_info:
+        parse_config(yaml.safe_dump(data))
+
+    [error] = exc_info.value.errors()
+    assert error["type"] == "less_than_equal"
+    assert error["loc"] == ("lookahead_weeks",)
+
+
+def test_parse_config_lookahead_limit_uses_shared_date_helper(monkeypatch):
+    monkeypatch.setattr(schema, "max_lookahead_weeks", lambda: 4)
+    data = valid_config_dict()
+
+    data["lookahead_weeks"] = 4
+    assert parse_config(yaml.safe_dump(data)).lookahead_weeks == 4
+
+    data["lookahead_weeks"] = 5
+    with pytest.raises(ValidationError) as exc_info:
+        parse_config(yaml.safe_dump(data))
+    assert exc_info.value.errors()[0]["ctx"] == {"le": 4}
 
 
 def test_parse_config_rejects_empty_categories():

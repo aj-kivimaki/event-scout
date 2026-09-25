@@ -50,6 +50,24 @@ def calculate_date_range(
     return start_date, end_date
 
 
+def max_lookahead_weeks(
+    today: date | None = None,
+) -> int:
+    """Return the largest lookahead whose date range fits in a date.
+
+    The bound is technical, not a business rule: the end date calculated by
+    calculate_date_range() must not exceed date.max. It depends on the start
+    date, so it is calculated rather than fixed.
+    """
+
+    start_date, _ = calculate_date_range(
+        1,
+        today=today,
+    )
+
+    return ((date.max - start_date).days + 1) // 7
+
+
 def filter_events_by_date(
     events: list[dict],
     start_date: str,

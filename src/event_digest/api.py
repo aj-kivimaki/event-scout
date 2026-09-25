@@ -2,15 +2,17 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
+from typing import Annotated
 
 import yaml
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Query, status
 from pydantic import BaseModel, ValidationError
 
 from src.config.parser import parse_config
 from src.event_digest.dates import (
     calculate_date_range,
     filter_events_by_date,
+    max_lookahead_weeks,
 )
 from src.event_digest.deduplication import deduplicate_events
 from src.event_digest.extraction import extract_event_data
@@ -151,7 +153,26 @@ def parse_config_endpoint(request: ConfigRequest):
 
 
 @app.post("/dates/calculate")
-def calculate_dates(lookahead_weeks: int):
+def calculate_dates(
+    lookahead_weeks: Annotated[int, Query(gt=0)],
+):
+    max_weeks = max_lookahead_weeks()
+
+    if lookahead_weeks > max_weeks:
+        # Same format as FastAPI's own query-parameter validation errors.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=[
+                {
+                    "type": "less_than_equal",
+                    "loc": ["query", "lookahead_weeks"],
+                    "msg": f"Input should be less than or equal to {max_weeks}",
+                    "input": str(lookahead_weeks),
+                    "ctx": {"le": max_weeks},
+                }
+            ],
+        )
+
     start_date, end_date = calculate_date_range(
         lookahead_weeks
     )

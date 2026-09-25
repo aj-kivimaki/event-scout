@@ -6,7 +6,7 @@ from typing import Annotated
 
 import yaml
 from fastapi import FastAPI, HTTPException, Query, status
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.config.parser import parse_config
 from src.event_digest.dates import (
@@ -45,10 +45,15 @@ class EventLocationRequest(BaseModel):
 
 
 class RadiusFilterRequest(BaseModel):
+    # NaN/inf are not valid coordinates or distances; range constraints alone
+    # would accept an infinite radius.
+    model_config = ConfigDict(allow_inf_nan=False)
+
     events: list[dict]
-    center_lat: float
-    center_lon: float
-    radius_km: float
+    center_lat: float = Field(ge=-90, le=90)
+    center_lon: float = Field(ge=-180, le=180)
+    # No upper bound: any positive finite radius is meaningful.
+    radius_km: float = Field(gt=0)
 
 
 class DateFilterRequest(BaseModel):

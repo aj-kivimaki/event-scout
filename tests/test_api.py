@@ -1202,49 +1202,156 @@ def test_deduplicate_duplicate_with_none_location(client):
     ]
 
 
+# --- Radius filter parameter validation --------------------------------------
+
+JOUTSA_EVENT = event_at("Joutsa", 61.7417, 26.1142)
+SYDNEY_EVENT = event_at("Sydney", -33.8688, 151.2093)
+
+NON_FINITE_STRINGS = [
+    pytest.param("nan", id="nan"),
+    pytest.param("NaN", id="nan-mixed-case"),
+    pytest.param("inf", id="inf"),
+    pytest.param("-inf", id="negative-inf"),
+    pytest.param("Infinity", id="infinity"),
+    pytest.param("-Infinity", id="negative-infinity"),
+]
+
+
+def radius_request(**overrides) -> dict:
+    return {"events": [JOUTSA_EVENT, SYDNEY_EVENT], **JOUTSA, "radius_km": 100, **overrides}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("center_lat", -90, id="latitude-min"),
+        pytest.param("center_lat", 90, id="latitude-max"),
+        pytest.param("center_lat", 0, id="latitude-zero"),
+        pytest.param("center_lon", -180, id="longitude-min"),
+        pytest.param("center_lon", 180, id="longitude-max"),
+        pytest.param("center_lon", 0, id="longitude-zero"),
+        pytest.param("radius_km", 100, id="radius-normal"),
+        pytest.param("radius_km", 0.001, id="radius-tiny"),
+        pytest.param("radius_km", 1e300, id="radius-very-large"),
+    ],
+)
+def test_filter_radius_accepts_valid_parameters(client, field, value):
+    response = client.post("/events/filter-radius", json=radius_request(**{field: value}))
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error_type"),
+    [
+        pytest.param("center_lat", -90.1, "greater_than_equal", id="latitude-below-min"),
+        pytest.param("center_lat", 90.1, "less_than_equal", id="latitude-above-max"),
+        pytest.param("center_lat", 500, "less_than_equal", id="latitude-far-out-of-range"),
+        pytest.param("center_lon", -180.1, "greater_than_equal", id="longitude-below-min"),
+        pytest.param("center_lon", 180.1, "less_than_equal", id="longitude-above-max"),
+        pytest.param("radius_km", 0, "greater_than", id="radius-zero"),
+        pytest.param("radius_km", -5, "greater_than", id="radius-negative"),
+    ],
+)
+def test_filter_radius_rejects_out_of_range_parameters(client, field, value, error_type):
+    response = client.post("/events/filter-radius", json=radius_request(**{field: value}))
+
+    assert response.status_code == 422
+    assert validation_errors(response) == {(error_type, ("body", field))}
+
+
+@pytest.mark.parametrize("value", NON_FINITE_STRINGS)
+@pytest.mark.parametrize("field", ["center_lat", "center_lon", "radius_km"])
+def test_filter_radius_rejects_non_finite_parameters(client, field, value):
+    response = client.post("/events/filter-radius", json=radius_request(**{field: value}))
+
+    assert response.status_code == 422
+    assert validation_errors(response) == {("finite_number", ("body", field))}
+
+
+def test_filter_radius_parameter_error_details(client):
+    response = client.post("/events/filter-radius", json=radius_request(center_lat=90.1))
+
+    assert response.json() == {
+        "detail": [
+            {
+                "type": "less_than_equal",
+                "loc": ["body", "center_lat"],
+                "msg": "Input should be less than or equal to 90",
+                "input": 90.1,
+                "ctx": {"le": 90},
+            }
+        ]
+    }
+
+
+def test_filter_radius_reports_all_invalid_parameters(client):
+    response = client.post(
+        "/events/filter-radius",
+        json=radius_request(center_lat=91, center_lon="inf", radius_km=0),
+    )
+
+    assert validation_errors(response) == {
+        ("less_than_equal", ("body", "center_lat")),
+        ("finite_number", ("body", "center_lon")),
+        ("greater_than", ("body", "radius_km")),
+    }
+
+
+def test_filter_radius_valid_request_result_is_unchanged(client):
+    response = client.post("/events/filter-radius", json=radius_request())
+
+    assert response.json() == filter_events_by_radius(
+        [JOUTSA_EVENT, SYDNEY_EVENT],
+        JOUTSA["center_lat"],
+        JOUTSA["center_lon"],
+        100,
+    )
+    assert [(event["name"], event["distanceKm"]) for event in response.json()] == [("Joutsa", 0.1)]
+
+
+def test_filter_radius_very_large_radius_keeps_distant_events(client):
+    response = client.post("/events/filter-radius", json=radius_request(radius_km=20000))
+
+    assert [(event["name"], event["distanceKm"]) for event in response.json()] == [
+        ("Joutsa", 0.1),
+        ("Sydney", 15100.1),
+    ]
+
+
 # --- Current behavior: known issues ------------------------------------------
 # These tests document the existing API contract, including behavior that is
 # probably wrong. They are intentionally explicit so that fixing any of these
 # issues becomes a deliberate, visible test change.
 
 @pytest.mark.parametrize(
-    ("radius_km", "expected_names"),
+    "raw_value",
     [
-        # Known issue: radius_km is not required to be positive or finite.
-        pytest.param(-5, [], id="negative"),
-        pytest.param("nan", [], id="nan-drops-everything"),
-        pytest.param("inf", ["Joutsa", "Sydney"], id="inf-keeps-everything"),
+        # Non-standard JSON literals, accepted by Python's JSON parser.
+        pytest.param("NaN", id="nan-literal"),
+        pytest.param("Infinity", id="infinity-literal"),
+        pytest.param("-Infinity", id="negative-infinity-literal"),
+        # Standard JSON number that overflows to infinity when parsed.
+        pytest.param("1e400", id="overflowing-number"),
     ],
 )
-def test_filter_radius_accepts_invalid_radius(client, radius_km, expected_names):
-    events = [event_at("Joutsa", 61.7417, 26.1142), event_at("Sydney", -33.8688, 151.2093)]
+@pytest.mark.parametrize("field", ["center_lat", "center_lon", "radius_km"])
+def test_filter_radius_non_finite_json_numbers_return_500(client, field, raw_value):
+    # Known issue: validation rejects the value, but FastAPI's default 422
+    # handler echoes it as "input", and a non-finite float cannot be written
+    # to a JSON response, so the client receives 500 instead of 422.
+    # String forms ("nan", "inf") return a proper 422.
+    values = {"center_lat": "61.742667", "center_lon": "26.112972", "radius_km": "100"}
+    values[field] = raw_value
+    body = '{"events": [], ' + ", ".join(f'"{key}": {value}' for key, value in values.items()) + "}"
 
-    response = client.post("/events/filter-radius", json={"events": events, **JOUTSA, "radius_km": radius_km})
+    response = client.post(
+        "/events/filter-radius",
+        content=body,
+        headers={"content-type": "application/json"},
+    )
 
-    assert response.status_code == 200
-    assert [event["name"] for event in response.json()] == expected_names
-
-
-@pytest.mark.parametrize(
-    ("center_lat", "expected_status"),
-    [
-        # Known issue: the center is not range- or finiteness-checked.
-        pytest.param(500, 200, id="out-of-range"),
-        pytest.param("nan", 200, id="nan"),
-        pytest.param("inf", 500, id="inf-crashes-haversine"),
-    ],
-)
-def test_filter_radius_accepts_invalid_center(client, center_lat, expected_status):
-    body = {
-        "events": [event_at("Joutsa", 61.7417, 26.1142)],
-        "center_lat": center_lat,
-        "center_lon": 26.112972,
-        "radius_km": 100,
-    }
-
-    response = client.post("/events/filter-radius", json=body)
-
-    assert response.status_code == expected_status
+    assert response.status_code == 500
 
 
 @pytest.mark.parametrize(

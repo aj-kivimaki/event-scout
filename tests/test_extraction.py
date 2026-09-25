@@ -1,12 +1,14 @@
 import copy
 import json
 import math
+import re
 from pathlib import Path
 
 import pytest
 
 from src.event_digest.extraction import (
     _parse_coordinate,
+    city_from_plain_address,
     clean_text,
     collect_jsonld_events,
     decode,
@@ -738,6 +740,21 @@ def test_extract_jsonld_price(offers, expected):
     assert extract_single(minimal_event(offers=offers))["price"] == expected
 
 
+def test_jsonld_offers_list_is_not_read_for_price():
+    """Only a single offers object is read for price.
+
+    This is deliberate, not data loss: in all captured real pages, offer
+    lists carry no usable price. JamBase lists ticket-seller links with
+    "price": "", and the only list-shaped pricing seen (AggregateOffer
+    lowPrice/highPrice) would need a price-range representation that the
+    project does not define.
+    """
+
+    event = minimal_event(offers=[{"@type": "Offer", "price": "25.00"}])
+
+    assert extract_single(event)["price"] is None
+
+
 def test_extract_jsonld_missing_offers_price_is_none():
     assert extract_single(minimal_event())["price"] is None
 
@@ -766,6 +783,61 @@ def test_extract_jsonld_address_locality_prefers_address_object():
 
     assert location["city"] == "Joutsa"
     assert location["address"] == "Jousitie 1"
+
+
+@pytest.mark.parametrize(
+    ("address", "expected_city"),
+    [
+        pytest.param("Jyväskylä, Finland", "Jyväskylä", id="city-country"),
+        pytest.param("  Joutsa ,  Finland ", "Joutsa", id="surrounding-whitespace"),
+        pytest.param("Jousitie 1, Joutsa", None, id="street-city"),
+        pytest.param("Jousitie 1, 19650 Joutsa, Finland", None, id="full-address"),
+        pytest.param("Joutsa", None, id="single-part"),
+        pytest.param(", Finland", None, id="empty-city"),
+        pytest.param("Joutsa,", None, id="empty-country"),
+        pytest.param("", None, id="empty"),
+        pytest.param(None, None, id="none"),
+    ],
+)
+def test_city_from_plain_address(address, expected_city):
+    assert city_from_plain_address(address) == expected_city
+
+
+@pytest.mark.parametrize(
+    ("address", "expected_city"),
+    [
+        pytest.param("Jyväskylä, Finland", "Jyväskylä", id="city-country"),
+        pytest.param("Jousitie 1, Joutsa", None, id="street-city"),
+    ],
+)
+def test_extract_jsonld_plain_text_address_is_preserved(address, expected_city):
+    event = minimal_event(location={"name": "Tanssisali Lutakko", "address": address})
+
+    location = extract_single(event)["location"]
+
+    assert location == {
+        "venue": "Tanssisali Lutakko",
+        "city": expected_city,
+        "address": address,
+        "latitude": None,
+        "longitude": None,
+    }
+
+
+def test_extract_jsonld_plain_text_address_does_not_override_address_locality():
+    event = minimal_event(location={"addressLocality": "Laukaa", "address": "Jyväskylä, Finland"})
+
+    location = extract_single(event)["location"]
+
+    assert (location["city"], location["address"]) == ("Laukaa", "Jyväskylä, Finland")
+
+
+def test_extract_jsonld_plain_text_address_whitespace_is_cleaned():
+    event = minimal_event(location={"address": "  Jyväskylä,\n  Finland "})
+
+    location = extract_single(event)["location"]
+
+    assert (location["city"], location["address"]) == ("Jyväskylä", "Jyväskylä, Finland")
 
 
 @pytest.mark.parametrize(
@@ -1251,6 +1323,58 @@ def test_extract_event_data_sample_page(sample_page_html):
     }
 
 
+def test_real_jambase_page_has_no_usable_prices(sample_page_html):
+    """JamBase publishes ticket-seller links, not prices.
+
+    Its offers are either a list of ticket-seller Offers whose "price" is
+    always an empty string, or a single Offer without a price field. Empty
+    price values are not recoverable prices, so every event's price is None.
+    """
+
+    offers = []
+    for raw in re.findall(r'<script type="application/ld\+json">([\s\S]*?)</script>', sample_page_html):
+        try:
+            for event in collect_jsonld_events(json.loads(raw), []):
+                entries = event.get("offers") or []
+                offers.extend(entries if isinstance(entries, list) else [entries])
+        except ValueError:
+            continue
+
+    results = extract_event_data(sample_page_html, PAGE_URL)
+
+    assert len(results) == 181
+    assert offers
+    assert {offer.get("price") for offer in offers} <= {"", None}
+    assert all(event["price"] is None for event in results)
+
+
+def test_real_concertarchives_plain_text_addresses(sample_page_html):
+    """ConcertArchives events give only "address": "Jyväskylä, Finland".
+
+    Before this was preserved, these events had neither city nor coordinates
+    and were dropped by the radius filter.
+    """
+
+    results = extract_event_data(sample_page_html, PAGE_URL)
+    concertarchives = [event for event in results if "concertarchives.org" in (event["url"] or "")]
+
+    stam1na = next(
+        event for event in concertarchives
+        if (event["name"], event["startDate"]) == ("Stam1na", "2026-12-19")
+    )
+    assert stam1na["location"] == {
+        "venue": "Tanssisali Lutakko",
+        "city": "Jyväskylä",
+        "address": "Jyväskylä, Finland",
+        "latitude": None,
+        "longitude": None,
+    }
+    assert len(concertarchives) == 50
+    assert {(event["location"]["city"], event["location"]["address"]) for event in concertarchives} == {
+        ("Jyväskylä", "Jyväskylä, Finland")
+    }
+
+
 # --- Current behavior: known issues ------------------------------------------
 # These tests document the existing implementation, including behavior that is
 # probably wrong. They are intentionally explicit so that fixing any of these
@@ -1286,28 +1410,11 @@ def test_get_field_does_not_read_unquoted_values():
     assert get_field('{"latitude": 61.7417}', "latitude") is None
 
 
-def test_jsonld_offers_list_gives_no_price():
-    # Known issue: schema.org allows (and JamBase uses) a list of offers, but
-    # only a single offers object is read.
-    event = minimal_event(offers=[{"@type": "Offer", "price": "25.00"}])
-
-    assert extract_single(event)["price"] is None
-
-
 def test_jsonld_unquoted_type_attribute_is_not_found():
     # Known issue: valid HTML without quotes around the type is ignored.
     html = html_page(jsonld_script(minimal_event(), attributes="type=application/ld+json"))
 
     assert extract_jsonld(html, PAGE_URL) == []
-
-
-def test_jsonld_string_address_is_ignored():
-    # Known issue: a plain-text address is valid schema.org but is dropped.
-    event = minimal_event(location={"name": "Joutsa-talo", "address": "Jousitie 1, Joutsa"})
-
-    location = extract_single(event)["location"]
-
-    assert (location["address"], location["city"]) == (None, None)
 
 
 def test_is_event_type_matches_any_word_ending_in_event():
@@ -1358,10 +1465,3 @@ def test_impossible_dates_are_accepted(function, value, expected):
 )
 def test_decode_leaves_other_entities_and_escapes(value, expected):
     assert decode(value) == expected
-
-
-def test_sample_page_prices_are_all_missing(sample_page_html):
-    # Known issue: consequence of the offers-list issue on real JamBase data.
-    results = extract_event_data(sample_page_html, PAGE_URL)
-
-    assert all(event["price"] is None for event in results)

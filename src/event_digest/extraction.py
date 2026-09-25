@@ -284,6 +284,30 @@ def collect_jsonld_events(
     return result
 
 
+def city_from_plain_address(address: str | None) -> str | None:
+    """Return the city from a plain-text "City, Country" address.
+
+    Only this simple two-part shape is recognized; other address strings
+    (for example "Street 1, City") return None.
+    """
+
+    if not address:
+        return None
+
+    parts = [
+        part.strip()
+        for part in address.split(",")
+    ]
+
+    if len(parts) != 2 or not all(parts):
+        return None
+
+    if any(character.isdigit() for character in parts[0]):
+        return None
+
+    return parts[0]
+
+
 def extract_jsonld(
     html: str,
     page_url: str | None,
@@ -347,9 +371,20 @@ def extract_jsonld(
                     else {}
                 )
 
+                # schema.org also allows a plain-text address.
+                address_text = (
+                    location.get("address")
+                    if isinstance(
+                        location.get("address"),
+                        str,
+                    )
+                    else None
+                )
+
                 city = clean_text(
                     address.get("addressLocality")
                     or location.get("addressLocality")
+                    or city_from_plain_address(address_text)
                 )
 
                 venue = clean_text(
@@ -391,6 +426,7 @@ def extract_jsonld(
                         "city": city,
                         "address": clean_text(
                             address.get("streetAddress")
+                            or address_text
                         ),
                         "latitude": _parse_coordinate(
                             latitude

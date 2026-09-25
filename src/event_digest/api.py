@@ -6,6 +6,7 @@ from typing import Annotated
 
 import yaml
 from fastapi import FastAPI, HTTPException, Query, status
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.config.parser import parse_config
@@ -15,6 +16,10 @@ from src.event_digest.dates import (
     max_lookahead_weeks,
 )
 from src.event_digest.deduplication import deduplicate_events
+from src.event_digest.errors import (
+    make_json_safe,
+    request_validation_error_handler,
+)
 from src.event_digest.extraction import extract_event_data
 from src.event_digest.locations import (
     filter_events_by_radius,
@@ -29,6 +34,11 @@ from src.event_digest.search_context import build_search_context
 
 
 app = FastAPI(title="Event Scout API")
+
+app.add_exception_handler(
+    RequestValidationError,
+    request_validation_error_handler,
+)
 
 
 class ConfigRequest(BaseModel):
@@ -79,7 +89,9 @@ def validation_error_details(
     Error locations are prefixed with the request field that was validated.
     """
 
-    details = json.loads(error.json(include_url=False))
+    details = make_json_safe(
+        json.loads(error.json(include_url=False))
+    )
 
     return [
         {

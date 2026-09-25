@@ -7,12 +7,14 @@ domain functions.
 """
 
 import json
+import math
 from datetime import date
 from functools import partial
 from pathlib import Path
 
 import pytest
 import yaml
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.config import schema
@@ -767,6 +769,21 @@ def error_details(response) -> list[dict]:
         pytest.param(config_yaml(radius_km=0), {("greater_than", (*YAML_TEXT, "radius_km"))}, id="radius-zero"),
         pytest.param(config_yaml(radius_km=-10), {("greater_than", (*YAML_TEXT, "radius_km"))}, id="radius-negative"),
         pytest.param(config_yaml(radius_km="far"), {("float_parsing", (*YAML_TEXT, "radius_km"))}, id="radius-text"),
+        pytest.param(
+            config_yaml(radius_km=math.inf),
+            {("finite_number", (*YAML_TEXT, "radius_km"))},
+            id="radius-inf",
+        ),
+        pytest.param(
+            config_yaml(radius_km=-math.inf),
+            {("finite_number", (*YAML_TEXT, "radius_km"))},
+            id="radius-negative-inf",
+        ),
+        pytest.param(
+            config_yaml(radius_km=math.nan),
+            {("finite_number", (*YAML_TEXT, "radius_km"))},
+            id="radius-nan",
+        ),
         # Invalid lookahead_weeks
         pytest.param(
             config_yaml(lookahead_weeks=0),
@@ -1319,40 +1336,267 @@ def test_filter_radius_very_large_radius_keeps_distant_events(client):
     ]
 
 
+# --- Non-finite numbers in validation errors ---------------------------------
+# Python's JSON parser accepts NaN/Infinity literals and overflows 1e400 to
+# infinity. Validation rejects them, and the rejected value is echoed as a
+# string ("nan", "inf", "-inf") so the 422 response is valid JSON.
+
+NON_FINITE_JSON_NUMBERS = [
+    pytest.param("NaN", "nan", id="nan-literal"),
+    pytest.param("Infinity", "inf", id="infinity-literal"),
+    pytest.param("-Infinity", "-inf", id="negative-infinity-literal"),
+    pytest.param("1e400", "inf", id="overflowing-number"),
+    pytest.param("-1e400", "-inf", id="negative-overflowing-number"),
+]
+
+
+def strict_json(response):
+    """Parse a response body, rejecting NaN/Infinity tokens."""
+
+    def reject(token):
+        raise ValueError(f"non-standard JSON token: {token}")
+
+    return json.loads(response.text, parse_constant=reject)
+
+
+def post_raw_radius(client, **raw_values):
+    values = {"center_lat": "61.742667", "center_lon": "26.112972", "radius_km": "100", **raw_values}
+    body = '{"events": [], ' + ", ".join(f'"{key}": {value}' for key, value in values.items()) + "}"
+    return client.post("/events/filter-radius", content=body, headers={"content-type": "application/json"})
+
+
+@pytest.mark.parametrize(("raw_value", "echoed"), NON_FINITE_JSON_NUMBERS)
+@pytest.mark.parametrize("field", ["center_lat", "center_lon", "radius_km"])
+def test_non_finite_json_number_returns_422(client, field, raw_value, echoed):
+    response = post_raw_radius(client, **{field: raw_value})
+
+    assert response.status_code == 422
+    assert strict_json(response) == {
+        "detail": [
+            {
+                "type": "finite_number",
+                "loc": ["body", field],
+                "msg": "Input should be a finite number",
+                "input": echoed,
+            }
+        ]
+    }
+
+
+def test_multiple_non_finite_json_numbers_return_one_422(client):
+    response = post_raw_radius(client, center_lat="NaN", center_lon="Infinity", radius_km="-Infinity")
+
+    assert response.status_code == 422
+    assert [(error["loc"][-1], error["input"]) for error in strict_json(response)["detail"]] == [
+        ("center_lat", "nan"),
+        ("center_lon", "inf"),
+        ("radius_km", "-inf"),
+    ]
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "Infinity"])
+def test_non_finite_strings_are_echoed_unchanged(client, value):
+    response = client.post("/events/filter-radius", json=radius_request(radius_km=value))
+
+    assert response.status_code == 422
+    assert strict_json(response)["detail"] == [
+        {
+            "type": "finite_number",
+            "loc": ["body", "radius_km"],
+            "msg": "Input should be a finite number",
+            "input": value,
+        }
+    ]
+
+
+def test_non_finite_json_number_inside_event_returns_422(client):
+    # /events/location formats its own 422 (validation_error_details()).
+    response = client.post(
+        "/events/location",
+        content='{"event": {"name": "A", "location": {"latitude": NaN, "longitude": 26.1}}}',
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert strict_json(response)["detail"] == [
+        {
+            "type": "finite_number",
+            "loc": ["body", "event", "location", "latitude"],
+            "msg": "Input should be a finite number",
+            "input": "nan",
+        }
+    ]
+
+
+@pytest.mark.parametrize("path", CONFIG_ENDPOINTS)
+@pytest.mark.parametrize(
+    ("yaml_value", "echoed"),
+    [
+        pytest.param(".inf", "inf", id="inf"),
+        pytest.param("-.inf", "-inf", id="negative-inf"),
+        pytest.param(".nan", "nan", id="nan"),
+    ],
+)
+def test_non_finite_config_radius_returns_422(client, path, yaml_value, echoed):
+    # YAML's .inf/-.inf/.nan reach config validation as non-finite floats.
+    yaml_text = config_yaml().replace("radius_km: 100", f"radius_km: {yaml_value}")
+
+    response = client.post(path, json={"yaml_text": yaml_text})
+
+    assert response.status_code == 422
+    assert strict_json(response)["detail"] == [
+        {
+            "type": "finite_number",
+            "loc": ["body", "yaml_text", "radius_km"],
+            "msg": "Input should be a finite number",
+            "input": echoed,
+        }
+    ]
+
+
+def center_yaml(**center) -> str:
+    return config_yaml(center={**EXPECTED_CONFIG["center"], **center})
+
+
+@pytest.mark.parametrize("path", CONFIG_ENDPOINTS)
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("latitude", -90, id="latitude-min"),
+        pytest.param("latitude", 90, id="latitude-max"),
+        pytest.param("latitude", 0, id="latitude-zero"),
+        pytest.param("longitude", -180, id="longitude-min"),
+        pytest.param("longitude", 180, id="longitude-max"),
+        pytest.param("longitude", 0, id="longitude-zero"),
+    ],
+)
+def test_config_center_within_bounds_is_valid(client, path, field, value):
+    response = client.post(path, json={"yaml_text": center_yaml(**{field: value})})
+
+    assert response.status_code == 200
+    if path != "/search/queries":
+        config = response.json() if path == "/config/parse" else response.json()["config"]
+        assert config["center"][field] == value
+
+
+@pytest.mark.parametrize("path", CONFIG_ENDPOINTS)
+@pytest.mark.parametrize(
+    ("field", "value", "error_type", "echoed"),
+    [
+        pytest.param("latitude", -90.1, "greater_than_equal", -90.1, id="latitude-below-min"),
+        pytest.param("latitude", 90.1, "less_than_equal", 90.1, id="latitude-above-max"),
+        pytest.param("longitude", -180.1, "greater_than_equal", -180.1, id="longitude-below-min"),
+        pytest.param("longitude", 180.1, "less_than_equal", 180.1, id="longitude-above-max"),
+        pytest.param("latitude", math.inf, "finite_number", "inf", id="latitude-inf"),
+        pytest.param("latitude", -math.inf, "finite_number", "-inf", id="latitude-negative-inf"),
+        pytest.param("latitude", math.nan, "finite_number", "nan", id="latitude-nan"),
+        pytest.param("longitude", math.inf, "finite_number", "inf", id="longitude-inf"),
+        pytest.param("longitude", -math.inf, "finite_number", "-inf", id="longitude-negative-inf"),
+        pytest.param("longitude", math.nan, "finite_number", "nan", id="longitude-nan"),
+    ],
+)
+def test_config_invalid_center_returns_422(client, path, field, value, error_type, echoed):
+    response = client.post(path, json={"yaml_text": center_yaml(**{field: value})})
+
+    assert response.status_code == 422
+    [detail] = strict_json(response)["detail"]
+    assert detail["type"] == error_type
+    assert detail["loc"] == ["body", "yaml_text", "center", field]
+    assert detail["input"] == echoed
+
+
+def test_config_center_error_details(client):
+    response = client.post("/config/parse", json={"yaml_text": center_yaml(latitude=90.1)})
+
+    assert strict_json(response)["detail"] == [
+        {
+            "type": "less_than_equal",
+            "loc": ["body", "yaml_text", "center", "latitude"],
+            "msg": "Input should be less than or equal to 90",
+            "input": 90.1,
+            "ctx": {"le": 90.0},
+        }
+    ]
+
+
+@pytest.mark.parametrize("path", CONFIG_ENDPOINTS)
+@pytest.mark.parametrize("radius_km", [0.001, 100, 1e300])
+def test_config_finite_positive_radius_is_valid(client, path, radius_km):
+    response = client.post(path, json={"yaml_text": config_yaml(radius_km=radius_km)})
+
+    assert response.status_code == 200
+    if path != "/search/queries":
+        config = response.json() if path == "/config/parse" else response.json()["config"]
+        assert config["radius_km"] == radius_km
+
+
+def test_non_finite_json_number_in_event_batch_is_still_skipped(client):
+    # Batch endpoints skip invalid events rather than returning 422.
+    body = (
+        '{"events": [{"name": "Bad", "location": {"latitude": Infinity, "longitude": 26.1}}, '
+        '{"name": "Good", "location": {"latitude": 61.7, "longitude": 26.1}}], '
+        '"center_lat": 61.742667, "center_lon": 26.112972, "radius_km": 100}'
+    )
+
+    response = client.post("/events/filter-radius", content=body, headers={"content-type": "application/json"})
+
+    assert response.status_code == 200
+    assert [event["name"] for event in response.json()] == ["Good"]
+
+
+def default_handler_app() -> FastAPI:
+    """The radius endpoint with FastAPI's default validation handler."""
+
+    plain = FastAPI()
+    plain.post("/events/filter-radius")(api.filter_events_radius_endpoint)
+    plain.post("/events/deduplicate")(api.deduplicate_events_endpoint)
+    return plain
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        pytest.param("/events/filter-radius", radius_request(center_lat=91), id="latitude-91"),
+        pytest.param("/events/filter-radius", radius_request(center_lon=181), id="longitude-181"),
+        pytest.param("/events/filter-radius", radius_request(radius_km=0), id="radius-zero"),
+        pytest.param("/events/filter-radius", radius_request(radius_km="far"), id="radius-text"),
+        pytest.param("/events/filter-radius", radius_request(radius_km=None), id="radius-null"),
+        pytest.param("/events/filter-radius", {"events": [], **JOUTSA}, id="missing-radius"),
+        pytest.param("/events/filter-radius", radius_request(events={"a": 1}), id="events-not-list"),
+        pytest.param("/events/filter-radius", radius_request(center_lat="nan"), id="nan-string"),
+        pytest.param("/events/deduplicate", {}, id="missing-events"),
+        pytest.param("/events/deduplicate", {"events": [1]}, id="event-not-object"),
+    ],
+)
+def test_ordinary_validation_errors_match_fastapi_default(client, path, body):
+    expected = TestClient(default_handler_app()).post(path, json=body)
+
+    response = client.post(path, json=body)
+
+    assert response.status_code == expected.status_code == 422
+    assert response.json() == expected.json()
+
+
+def test_ordinary_validation_error_body_is_unchanged(client):
+    response = client.post("/events/filter-radius", json=radius_request(center_lat=91))
+
+    assert response.json() == {
+        "detail": [
+            {
+                "type": "less_than_equal",
+                "loc": ["body", "center_lat"],
+                "msg": "Input should be less than or equal to 90",
+                "input": 91,
+                "ctx": {"le": 90.0},
+            }
+        ]
+    }
+
+
 # --- Current behavior: known issues ------------------------------------------
 # These tests document the existing API contract, including behavior that is
 # probably wrong. They are intentionally explicit so that fixing any of these
 # issues becomes a deliberate, visible test change.
-
-@pytest.mark.parametrize(
-    "raw_value",
-    [
-        # Non-standard JSON literals, accepted by Python's JSON parser.
-        pytest.param("NaN", id="nan-literal"),
-        pytest.param("Infinity", id="infinity-literal"),
-        pytest.param("-Infinity", id="negative-infinity-literal"),
-        # Standard JSON number that overflows to infinity when parsed.
-        pytest.param("1e400", id="overflowing-number"),
-    ],
-)
-@pytest.mark.parametrize("field", ["center_lat", "center_lon", "radius_km"])
-def test_filter_radius_non_finite_json_numbers_return_500(client, field, raw_value):
-    # Known issue: validation rejects the value, but FastAPI's default 422
-    # handler echoes it as "input", and a non-finite float cannot be written
-    # to a JSON response, so the client receives 500 instead of 422.
-    # String forms ("nan", "inf") return a proper 422.
-    values = {"center_lat": "61.742667", "center_lon": "26.112972", "radius_km": "100"}
-    values[field] = raw_value
-    body = '{"events": [], ' + ", ".join(f'"{key}": {value}' for key, value in values.items()) + "}"
-
-    response = client.post(
-        "/events/filter-radius",
-        content=body,
-        headers={"content-type": "application/json"},
-    )
-
-    assert response.status_code == 500
-
 
 @pytest.mark.parametrize(
     ("start_date", "end_date"),

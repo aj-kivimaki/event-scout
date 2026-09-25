@@ -171,6 +171,36 @@ def test_parse_config_rejects_non_positive_numbers(field, value):
     assert (field,) in error_locations(exc_info.value)
 
 
+@pytest.mark.parametrize("yaml_value", [".inf", "-.inf", ".nan"])
+def test_parse_config_rejects_non_finite_radius(yaml_value):
+    yaml_text = VALID_CONFIG_YAML.replace("radius_km: 100", f"radius_km: {yaml_value}")
+
+    with pytest.raises(ValidationError) as exc_info:
+        parse_config(yaml_text)
+
+    [error] = exc_info.value.errors()
+    assert (error["type"], error["loc"]) == ("finite_number", ("radius_km",))
+
+
+@pytest.mark.parametrize("radius_km", [0.001, 100, 1e300])
+def test_parse_config_accepts_finite_positive_radius(radius_km):
+    data = valid_config_dict()
+    data["radius_km"] = radius_km
+
+    assert parse_config(yaml.safe_dump(data)).radius_km == radius_km
+
+
+@pytest.mark.parametrize("yaml_value", [".inf", ".nan"])
+def test_parse_config_non_finite_lookahead_weeks_is_unchanged(yaml_value):
+    # lookahead_weeks is an int; non-finite values were already rejected.
+    yaml_text = VALID_CONFIG_YAML.replace("lookahead_weeks: 3", f"lookahead_weeks: {yaml_value}")
+
+    with pytest.raises(ValidationError) as exc_info:
+        parse_config(yaml_text)
+
+    assert exc_info.value.errors()[0]["type"] == "finite_number"
+
+
 def test_parse_config_rejects_lookahead_weeks_beyond_representable_dates():
     data = valid_config_dict()
     data["lookahead_weeks"] = 10**9
@@ -229,6 +259,55 @@ def test_parse_config_rejects_wrong_types(path, value):
 
     locations = error_locations(exc_info.value)
     assert any(location[: len(path)] == path for location in locations)
+
+
+# --- Center coordinates ------------------------------------------------------
+
+
+def config_with_center(**center) -> str:
+    data = valid_config_dict()
+    data["center"].update(center)
+    return yaml.safe_dump(data)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("latitude", -90, id="latitude-min"),
+        pytest.param("latitude", 90, id="latitude-max"),
+        pytest.param("latitude", 0, id="latitude-zero"),
+        pytest.param("longitude", -180, id="longitude-min"),
+        pytest.param("longitude", 180, id="longitude-max"),
+        pytest.param("longitude", 0, id="longitude-zero"),
+    ],
+)
+def test_parse_config_accepts_center_coordinates_within_bounds(field, value):
+    config = parse_config(config_with_center(**{field: value}))
+
+    assert getattr(config.center, field) == value
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error_type"),
+    [
+        pytest.param("latitude", -90.1, "greater_than_equal", id="latitude-below-min"),
+        pytest.param("latitude", 90.1, "less_than_equal", id="latitude-above-max"),
+        pytest.param("longitude", -180.1, "greater_than_equal", id="longitude-below-min"),
+        pytest.param("longitude", 180.1, "less_than_equal", id="longitude-above-max"),
+        pytest.param("latitude", float("inf"), "finite_number", id="latitude-inf"),
+        pytest.param("latitude", float("-inf"), "finite_number", id="latitude-negative-inf"),
+        pytest.param("latitude", float("nan"), "finite_number", id="latitude-nan"),
+        pytest.param("longitude", float("inf"), "finite_number", id="longitude-inf"),
+        pytest.param("longitude", float("-inf"), "finite_number", id="longitude-negative-inf"),
+        pytest.param("longitude", float("nan"), "finite_number", id="longitude-nan"),
+    ],
+)
+def test_parse_config_rejects_invalid_center_coordinates(field, value, error_type):
+    with pytest.raises(ValidationError) as exc_info:
+        parse_config(config_with_center(**{field: value}))
+
+    [error] = exc_info.value.errors()
+    assert (error["type"], error["loc"]) == (error_type, ("center", field))
 
 
 # --- Current lenient behavior ------------------------------------------------

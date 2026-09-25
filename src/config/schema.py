@@ -1,16 +1,24 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_core import PydanticCustomError
 
 from src.event_digest.dates import max_lookahead_weeks
 
 
 class CenterConfig(BaseModel):
+    # Same geographic contract as the radius-filter API parameters.
+    model_config = ConfigDict(allow_inf_nan=False)
+
     name: str
-    latitude: float
-    longitude: float
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
 
 
 class EventScoutConfig(BaseModel):
+    # Reject NaN/inf floats (radius_km); gt=0 alone accepts infinity.
+    # Model config is not inherited by the nested CenterConfig, which sets
+    # its own.
+    model_config = ConfigDict(allow_inf_nan=False)
+
     center: CenterConfig
     radius_km: float = Field(gt=0)
     lookahead_weeks: int = Field(gt=0)

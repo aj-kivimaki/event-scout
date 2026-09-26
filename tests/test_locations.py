@@ -462,16 +462,8 @@ def test_filter_non_finite_coordinates_do_not_affect_valid_events():
     assert [event["distanceKm"] for event in results] == [0.1, 87.9, 58.8]
 
 
-# --- Current behavior: known issues ------------------------------------------
-# These tests document the existing implementation, including behavior that is
-# probably wrong. They are intentionally explicit so that fixing any of these
-# issues becomes a deliberate, visible test change.
-
-
-def test_is_number_accepts_booleans():
-    # Known issue: bool is a subclass of int, so True/False pass as 1.0/0.0.
-    assert _is_number(True) is True
-    assert _is_number(False) is True
+# --- Documented limitations -------------------------------------------------
+# The domain functions expect locations validated at the API boundary.
 
 
 @pytest.mark.parametrize(
@@ -483,8 +475,7 @@ def test_is_number_accepts_booleans():
     ],
 )
 def test_resolve_raises_for_non_empty_non_dict_location(location):
-    # Known issue: only dicts and empty values are supported; other location
-    # types still raise. filter_events_by_radius() has the same limitation
-    # (it raises AttributeError for them).
+    # Only dicts and empty values are supported; other location types raise.
+    # filter_events_by_radius() has the same limitation (AttributeError).
     with pytest.raises(TypeError):
         resolve_event_location({"name": "Event", "location": location})

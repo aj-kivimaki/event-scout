@@ -18,8 +18,7 @@ env/
 !.env.example
 
 # Local data
-data/*
-!data/.gitkeep
+data/
 
 # n8n local data
 n8n/data/

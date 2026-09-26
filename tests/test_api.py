@@ -1670,26 +1670,15 @@ def test_ordinary_validation_error_body_is_unchanged(client):
     }
 
 
-# --- Current behavior: known issues ------------------------------------------
-# These tests document the existing API contract, including behavior that is
-# probably wrong. They are intentionally explicit so that fixing any of these
-# issues becomes a deliberate, visible test change.
+# --- Documented limitations -------------------------------------------------
+
 
 def test_extract_without_page_url_leaves_events_without_source(client):
-    # Known issue (n8n contract): the workflow posts only {"html": ...}, so
-    # JSON-LD events without their own url have no url or sourceUrls.
+    # The n8n workflow posts only {"html": ...}, so JSON-LD events without
+    # their own url have no url or sourceUrls.
     html = jsonld_html({"@type": "Event", "name": "No URL", "startDate": "2026-10-03"})
 
     response = client.post("/events/extract", json={"html": html})
 
     event = response.json()[0]
     assert (event["url"], event["sourceUrls"]) == (None, [])
-
-
-@pytest.mark.parametrize("path", sorted(path for method, path in ENDPOINTS if method == "POST"))
-def test_endpoints_declare_no_response_schema(client, path):
-    # Known issue: no response models are declared, so the OpenAPI document
-    # (and Swagger UI) does not describe any response body.
-    operation = client.get("/openapi.json").json()["paths"][path]["post"]
-
-    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {}

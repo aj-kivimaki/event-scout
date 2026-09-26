@@ -34,21 +34,6 @@ def clean_text(value: object | None) -> str | None:
     return " ".join(str(value).split()).strip()
 
 
-def get_field(raw: str, field: str) -> str | None:
-    """Extract a quoted field from raw event data."""
-
-    pattern = (
-        rf'"{re.escape(field)}"\s*:\s*"((?:\\.|[^"])*)"'
-    )
-
-    match = re.search(pattern, raw)
-
-    if not match:
-        return None
-
-    return decode(match.group(1))
-
-
 def _parse_coordinate(value: object | None) -> float | None:
     """Convert a coordinate to a finite float.
 
@@ -130,7 +115,7 @@ def extract_time(value: object | None) -> str | None:
 
     # Finnish format: klo 19 / klo 19.30 / kl. 19.30
     match = re.search(
-        r"\b(?:klo|kl\.?)\s*(\d{1,2})(?::|\.)(\d{2})?\b",
+        r"\b(?:klo|kl\.?)\s*(\d{1,2})(?:[:.](\d{2}))?\b",
         text,
         re.IGNORECASE,
     )

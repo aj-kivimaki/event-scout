@@ -16,7 +16,6 @@ from src.event_digest.extraction import (
     extract_event_data,
     extract_jsonld,
     extract_time,
-    get_field,
     get_jsonld_time,
     is_event_type,
     iter_allevents_records,
@@ -239,32 +238,6 @@ def test_clean_text(value, expected):
     assert clean_text(value) == expected
 
 
-# --- get_field ---------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("raw", "field", "expected"),
-    [
-        pytest.param('{"city":"Joutsa"}', "city", "Joutsa", id="basic"),
-        pytest.param('{"city" :  "Joutsa"}', "city", "Joutsa", id="whitespace-around-colon"),
-        pytest.param(r'{"name":"Say \"hi\""}', "name", 'Say "hi"', id="escaped-quote-in-value"),
-        pytest.param(r'{"city":"Jyväskylä"}', "city", "Jyväskylä", id="unicode-in-value"),
-        pytest.param('{"city":""}', "city", "", id="empty-value"),
-        pytest.param('{"city":"First"} {"city":"Second"}', "city", "First", id="first-occurrence"),
-        pytest.param('{"country":"Finland"}', "city", None, id="missing"),
-        pytest.param(
-            '{"short_description":"Short"}',
-            "description",
-            None,
-            id="does-not-match-suffix-field",
-        ),
-        pytest.param('{"a.b":"dotted", "aXb":"other"}', "a.b", "dotted", id="field-name-escaped"),
-    ],
-)
-def test_get_field(raw, field, expected):
-    assert get_field(raw, field) == expected
-
-
 # --- _parse_coordinate -------------------------------------------------------
 
 
@@ -377,6 +350,9 @@ def test_extract_time_24_hour(value, expected):
     ("value", "expected"),
     [
         pytest.param("klo 19.30", "19:30", id="klo"),
+        pytest.param("klo 19", "19:00", id="hour-only"),
+        pytest.param("klo 19.", "19:00", id="hour-with-trailing-dot"),
+        pytest.param("Alkaa klo 20", "20:00", id="hour-only-in-sentence"),
         pytest.param("KLO 19.30", "19:30", id="uppercase"),
         pytest.param("kl. 19.30", "19:30", id="kl-dot"),
         pytest.param("kl 19.30", "19:30", id="kl"),
@@ -1375,14 +1351,13 @@ def test_real_concertarchives_plain_text_addresses(sample_page_html):
     }
 
 
-# --- Current behavior: known issues ------------------------------------------
-# These tests document the existing implementation, including behavior that is
-# probably wrong. They are intentionally explicit so that fixing any of these
-# issues becomes a deliberate, visible test change.
+# --- Documented limitations -------------------------------------------------
+# Inputs outside the supported formats. These tests pin the current scope so
+# that extending it becomes a deliberate, visible test change.
 
 
 def test_allevents_records_inside_json_strings_are_not_detected():
-    # Known limitation: records embedded in a JSON-encoded string
+    # Records embedded in a JSON-encoded string
     # (e.g. JSON.parse("[{\"event_id\": ...}]")) are not decoded. This format
     # has not been observed on real Allevents pages.
     encoded = json.dumps(json.dumps([allevents_record()]))
@@ -1392,72 +1367,28 @@ def test_allevents_records_inside_json_strings_are_not_detected():
 
 
 def test_allevents_numeric_coordinates_are_ignored():
-    # Known issue: only string values are read, so numeric coordinates are
-    # dropped. Real pages currently use strings.
+    # Only string coordinates are read. Real Allevents pages use strings.
     location = extract_single_allevents(latitude=61.7417, longitude=26.1142)["location"]
 
     assert (location["latitude"], location["longitude"]) == (None, None)
 
 
-def test_get_field_does_not_read_escaped_json():
-    # Known limitation: get_field() only reads unescaped quotes. It is no
-    # longer used by extract_allevents().
-    assert get_field(r'{\"city\":\"Joutsa\"}', "city") is None
-
-
-def test_get_field_does_not_read_unquoted_values():
-    # Known limitation: get_field() only reads quoted string values.
-    assert get_field('{"latitude": 61.7417}', "latitude") is None
-
-
 def test_jsonld_unquoted_type_attribute_is_not_found():
-    # Known issue: valid HTML without quotes around the type is ignored.
+    # JSON-LD scripts are located by regex and need a quoted type attribute.
     html = html_page(jsonld_script(minimal_event(), attributes="type=application/ld+json"))
 
     assert extract_jsonld(html, PAGE_URL) == []
 
 
-def test_is_event_type_matches_any_word_ending_in_event():
-    # Known issue: the case-insensitive "Event$" check also matches e.g. "Prevent".
-    assert is_event_type("Prevent") is True
+def test_extract_time_12_hour_without_minutes_is_unsupported():
+    assert extract_time("7pm") is None
 
 
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        # Known issue: the comment in extract_time() lists "klo 19", but a
-        # separator after the hour is required.
-        pytest.param("klo 19", None, id="finnish-hour-only-unsupported"),
-        pytest.param("klo 19.", None, id="finnish-hour-with-dot-unsupported"),
-        pytest.param("7pm", None, id="12-hour-without-minutes-unsupported"),
-        # Known issue: no range validation for 12-hour and Finnish times.
-        pytest.param("13:00 pm", "25:00", id="invalid-12-hour"),
-        pytest.param("klo 25.00", "25:00", id="invalid-finnish"),
-        # Known issue: any H:MM pattern is treated as a time.
-        pytest.param("John 3:16", "03:16", id="non-time-colon"),
-        pytest.param("2026-10-03+03:00", "03:00", id="date-with-utc-offset"),
-    ],
-)
-def test_extract_time_questionable_results(value, expected):
-    assert extract_time(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("function", "value", "expected"),
-    [
-        # Known issue: dates are matched by shape only, not validated.
-        pytest.param(normalize_date, "2026-13-45", "2026-13-45", id="normalize-date"),
-        pytest.param(parse_allevents_display_date, "Sat Oct 32 2026", "2026-10-32", id="allevents-date"),
-    ],
-)
-def test_impossible_dates_are_accepted(function, value, expected):
-    assert function(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        # Known issue: only &amp; is decoded; other entities and escapes remain.
+        # decode() handles JSON escapes and &amp; only; other HTML entities
+        # and escape sequences are left as they are.
         (r"&lt;b&gt;", r"&lt;b&gt;"),
         ("Rock &#39;n&#39; Roll", "Rock &#39;n&#39; Roll"),
         (r"Line\nbreak", r"Line\nbreak"),

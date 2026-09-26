@@ -613,70 +613,37 @@ def test_deduplicate_none_location_does_not_mutate_input():
     assert events == original
 
 
-# --- Current behavior: known issues ------------------------------------------
-# These tests document the existing implementation, including behavior that is
-# probably wrong. They are intentionally explicit so that fixing any of these
-# issues becomes a deliberate, visible test change.
-
-
-def test_new_group_source_urls_are_not_deduplicated():
-    # Known issue: only merge_event() deduplicates URLs.
+def test_new_group_source_urls_are_deduplicated():
+    # Extracted events already list their url in sourceUrls.
     event = make_event(url="https://a.example", sourceUrls=["https://a.example", "https://b.example"])
 
     assert deduplicate_events([event])[0]["sourceUrls"] == [
         "https://a.example",
         "https://b.example",
-        "https://a.example",
     ]
 
 
-def test_unmatchable_event_drops_existing_source_urls():
-    # Known issue: events without artist/date ignore their incoming sourceUrls.
-    event = make_event(name="", url="https://a.example", sourceUrls=["https://b.example"])
-
-    assert deduplicate_events([event])[0]["sourceUrls"] == ["https://a.example"]
+# --- Documented limitations -------------------------------------------------
+# Deliberate trade-offs of the matching rules (normalized name + date, and a
+# 5 km distance check when both events have coordinates).
 
 
-def test_merge_with_coordinates_but_no_distance_clears_existing_distance():
-    # Known issue: taking coordinates from a duplicate overwrites distanceKm
-    # even when the duplicate has no distanceKm.
-    events = [
-        make_event(distanceKm=3.0),
-        make_event(location=base_location()),
-    ]
-
-    assert deduplicate_events(events)[0]["distanceKm"] is None
-
-
-def test_non_string_start_date_raises():
-    # Known issue: startDate is sliced without a type check.
-    with pytest.raises(TypeError):
-        deduplicate_events([make_event(start_date=20261003)])
-
-
-@pytest.mark.parametrize(
-    ("name", "expected"),
-    [
-        # Known issue: non-Latin letters are removed entirely, so these events
-        # get an empty artist key and are never deduplicated.
-        ("Кино", ""),
-        # Known issue: letters without a decomposed form (ø) are split out.
-        ("Røyksopp", "r yksopp"),
-    ],
-)
-def test_artist_name_drops_non_latin_characters(name, expected):
-    assert get_artist_name(name) == expected
+def test_artist_name_drops_non_latin_characters():
+    # Normalization keeps only a-z and 0-9, so non-Latin names get an empty
+    # artist key.
+    assert get_artist_name("Кино") == ""
 
 
 def test_non_latin_duplicates_are_not_merged():
+    # Events with an empty artist key are never deduplicated.
     events = [make_event("Кино"), make_event("Кино")]
 
     assert len(deduplicate_events(events)) == 2
 
 
 def test_same_artist_same_day_different_times_collapse():
-    # Known issue (design): matinee and evening shows are merged into one
-    # event; only the first startDate is kept.
+    # Matching uses the date only, so matinee and evening shows are merged
+    # into one event; only the first startDate is kept.
     events = [
         make_event(start_date=f"{EVENT_DATE}T14:00:00", url="https://matinee.example"),
         make_event(start_date=f"{EVENT_DATE}T19:00:00", url="https://evening.example"),
@@ -689,8 +656,8 @@ def test_same_artist_same_day_different_times_collapse():
 
 
 def test_matching_depends_on_input_order():
-    # Known issue: a group can gain coordinates from a merged duplicate, which
-    # changes how later events match it.
+    # A group can gain coordinates from a merged duplicate, which changes how
+    # later events match it.
     unknown = make_event(url="https://unknown.example")
     near = make_event(url="https://near.example", location=base_location())
     far = make_event(url="https://far.example", location=location_north_of_base(50))

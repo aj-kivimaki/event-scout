@@ -48,6 +48,8 @@ It is currently **manual and inactive**. The repository contains a repeatable te
 
 The live Tavily search path and Gmail delivery path are intentionally disconnected in the current workflow.
 
+The workflow sends only the page HTML to `/events/extract`, not the page URL. JSON-LD events without their own `url` therefore have no source link.
+
 ## Python API
 
 | Method | Endpoint | Purpose |
@@ -217,6 +219,15 @@ After changing Python source code:
 make rebuild
 ```
 
+### Import the workflow
+
+1. Open n8n at `http://localhost:5679`.
+2. Create a new workflow and choose **Import from File**.
+3. Select [`workflows/Weekly Event Scout.json`](workflows/Weekly%20Event%20Scout.json).
+4. Run it with **Execute workflow**.
+
+The test-data path needs no credentials. The Tavily and Gmail nodes reference credentials that are not included in the repository.
+
 ### Local Python environment
 
 ```bash
@@ -261,6 +272,8 @@ For the current saved JamBase test page, using a 100 km radius around Joutsa and
         v
 6 after deduplication
 ```
+
+The automated tests pin this date range. The n8n test-data run instead uses the search period calculated from the current date, so its results change over time as the saved page's events fall outside the period.
 
 ## Technology
 

@@ -62,14 +62,16 @@ def deduplicate_events(events: list[dict]) -> list[dict]:
         else:
             groups.append({
                 **event,
-                "sourceUrls": [
-                    *(event.get("sourceUrls") or []),
-                    *(
-                        [event["url"]]
-                        if event.get("url")
-                        else []
-                    ),
-                ],
+                "sourceUrls": list(
+                    dict.fromkeys([
+                        *(event.get("sourceUrls") or []),
+                        *(
+                            [event["url"]]
+                            if event.get("url")
+                            else []
+                        ),
+                    ])
+                ),
             })
 
     return groups
@@ -106,13 +108,6 @@ def get_artist_name(name) -> str:
     value = str(name or "")
 
     value = value.split("@")[0]
-
-    value = re.sub(
-        r"\s+-\s+(?:[^-]+)\s+-\s+(?:[^-]+)\s+-\s+\w+\s+\d{1,2},\s+\d{4}$",
-        "",
-        value,
-        flags=re.IGNORECASE,
-    )
 
     value = re.sub(
         r"\s+-\s+[^-]+?\s+-\s+[^-]+?\s+-\s+\w+\s+\d{1,2},\s+\d{4}$",

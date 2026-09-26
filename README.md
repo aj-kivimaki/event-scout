@@ -2,133 +2,120 @@
 
 A Python + FastAPI event discovery pipeline orchestrated by n8n.
 
-Event Scout looks for concerts, live music, stand-up, comedy and other cultural events around Joutsa, Finland. It generates search queries, fetches event pages, extracts structured event data, resolves locations, filters by date and distance, removes duplicates, and builds an HTML digest grouped by week.
+Event Scout finds concerts, live music, stand-up, comedy, and other cultural events around Joutsa, Finland. It generates search queries, fetches event pages, extracts structured event data, resolves locations, filters events by date and distance, removes duplicates, and builds an HTML digest grouped by week.
 
-The project is a practical example of separating **workflow orchestration** (n8n) from **application logic** (Python), so that the logic is validated at an API boundary and covered by automated tests.
+The project demonstrates a separation between **workflow orchestration** (n8n) and **application logic** (Python), with a validated HTTP API boundary and automated tests.
 
 ## Architecture
 
 ```text
-Internet / event pages
-          ↓
-         n8n  ── search (Tavily) + fetch pages
-          ↓  HTTP
-   Python / FastAPI
-          ↓
-    Extract events
-          ↓
-   Filter by date
-          ↓
-   Resolve locations
-          ↓
-   Filter by radius
-          ↓
-      Deduplicate
-          ↓
-         n8n  ── group by week, build HTML digest, email (Gmail)
+Event sources
+     |
+     v
+    n8n
+ search + fetch
+     |
+     | HTTP
+     v
+Python / FastAPI
+     |
+     +--> Extract events
+     |
+     +--> Filter by date
+     |
+     +--> Resolve locations
+     |
+     +--> Filter by radius
+     |
+     +--> Deduplicate
+     |
+     v
+    n8n
+ group by week
+ build HTML digest
+     |
+     v
+  Gmail (optional)
 ```
 
-n8n is responsible for orchestration and external I/O: reading the configuration file, calling the search API, fetching pages, presenting the digest and sending email. Python contains the application logic and exposes it to n8n through HTTP endpoints.
+n8n handles workflow orchestration and external I/O. Python contains the application logic and exposes it through FastAPI endpoints.
 
-## n8n workflow
+## Current workflow
 
-The workflow is stored in [`workflows/Weekly Event Scout.json`](workflows/Weekly%20Event%20Scout.json) and is imported into n8n manually.
+The workflow is stored in [`workflows/Weekly Event Scout.json`](workflows/Weekly%20Event%20Scout.json).
 
-```text
-Manual Trigger
-  ├─ Read Config File → Extract Config Text
-  │    → Python — Build Search Context
-  │    → Python — Generate Search Queries
-  │    ⋯ (disconnected) ⋯
-  │    Search Web — Tavily → Flatten Search Results → Deduplicate URLs
-  │    → Filter Event URLs → Add Fetch Index → Fetch Event Pages ─┐
-  │                                                               ↓
-  └─ Read Test Data → Extract from File ──────→ Python — Extract Event Data
-                                                → Python — Filter Events by Date
-                                                → Python — Resolve Event Locations
-                                                → Python — Filter Events by Radius
-                                                → Python — Deduplicate Events
-                                                → Prepare Event Data
-                                                → Group Events by Week
-                                                → Build Email HTML
-                                                ⋯ (disconnected) ⋯
-                                                Send a message (Gmail)
-```
+It is currently **manual and inactive**. The repository contains a repeatable test-data path so the Python pipeline can be exercised without live search or email credentials.
 
-Current state of the workflow in the repository:
+The live Tavily search path and Gmail delivery path are intentionally disconnected in the current workflow.
 
-- It is **manual and inactive**; there is no schedule trigger.
-- The live search path is **disconnected** between query generation and Tavily. Live search requires a Tavily API key, configured in n8n as a Bearer Auth credential.
-- Email delivery is **disconnected** after the HTML digest is built. Sending requires a Gmail OAuth2 credential in n8n.
-- A **test-data branch** reads the saved page `config/test-event-page.html` so the Python pipeline and digest can be run without live searches. When Build Search Context has not run, the date and radius nodes fall back to fixed test values (2026-09-28 to 2026-10-18, Joutsa, 100 km).
+## Python API
 
-To run the live pipeline, create the two credentials in n8n and reconnect the disconnected edges.
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `POST` | `/config/parse` | Parse and validate YAML configuration |
+| `POST` | `/dates/calculate` | Calculate the search date range |
+| `POST` | `/search/context` | Validate configuration and calculate dates |
+| `POST` | `/search/queries` | Generate discovery search queries |
+| `POST` | `/events/extract` | Extract events from HTML |
+| `POST` | `/events/filter-date` | Filter events by date |
+| `POST` | `/events/location` | Resolve coordinates for an event |
+| `POST` | `/events/filter-radius` | Filter events by distance |
+| `POST` | `/events/deduplicate` | Merge duplicate events |
 
-## Python application
+Interactive API documentation is available at:
 
-### API
+- `http://localhost:8000/docs`
+- `http://localhost:8000/redoc`
 
-| Method | Endpoint | Purpose | Used by the workflow |
-|---|---|---|---|
-| GET | `/health` | Health check | |
-| POST | `/config/parse` | Parse and validate YAML configuration | |
-| POST | `/dates/calculate` | Calculate the search date range | |
-| POST | `/search/context` | Validated configuration and date range | ✓ |
-| POST | `/search/queries` | Generate discovery search queries | ✓ |
-| POST | `/events/extract` | Extract events from an HTML page | ✓ |
-| POST | `/events/filter-date` | Keep events within the date range | ✓ |
-| POST | `/events/location` | Resolve coordinates for one event | ✓ |
-| POST | `/events/filter-radius` | Keep events within the radius | ✓ |
-| POST | `/events/deduplicate` | Merge duplicate events | ✓ |
+## Data processing
 
-Interactive API documentation is available at `http://localhost:8000/docs` and `http://localhost:8000/redoc`.
+### Extraction
 
-### Validation and errors
+The extractor supports:
 
-- Requests are validated with Pydantic. Invalid requests and invalid configuration return `422` in FastAPI's standard validation-error format.
-- Events are validated with the `Event`/`Location` models in `models.py`. Batch endpoints skip and log individual invalid events so that one malformed scraped event does not fail the whole batch; `/events/location` returns `422` for an invalid event.
-- Coordinates, radius and dates are range-checked, and non-finite numbers (`NaN`, `Infinity`) are rejected.
+- JSON-LD event data, including `@graph`, nested event objects, lists, and event types ending in `Event`
+- Allevents listing pages
+- 12-hour and 24-hour time formats
+- Finnish `klo` / `kl.` time formats
+- venue, city, address, coordinates, and source URLs
 
-### Event extraction
-
-Two strategies are used:
-
-- **JSON-LD** — `<script type="application/ld+json">` blocks, including `@graph`, nested `event` objects, lists, and any `@type` ending in `Event`.
-- **Allevents** — event records embedded in Allevents listing pages.
-
-The extractor normalizes dates, extracts times (12-hour, 24-hour and Finnish `klo` / `kl.` formats), venue, city, address and coordinates, and preserves source URLs. Malformed coordinates are ignored per event.
+Malformed coordinates are ignored per event rather than failing the entire batch.
 
 ### Date filtering
 
-The search period is a whole number of Monday–Sunday weeks starting from the next Monday (Helsinki time). Events are kept when their start date is in the period. Long-running events are also kept for dates mentioned in their description (ISO dates and `Month D, YYYY`) that fall within the period.
+The search period consists of whole Monday–Sunday weeks starting from the next Monday in Helsinki time.
+
+Events are kept when their start date falls within the period. Long-running events can also be retained when matching dates are found in their descriptions.
 
 ### Location handling
 
-Events receive coordinates in two ways:
+Coordinates come from:
 
 1. Coordinates present in the source data.
-2. A hard-coded table of city coordinates for the Joutsa region (and Helsinki/Espoo).
+2. A hard-coded city coordinate table covering the Joutsa region and Helsinki/Espoo.
 
-Distance from the configured center is calculated with the Haversine formula. There is no geocoding: events without coordinates or a known city are marked `needs_geocoding` and are excluded by the radius filter.
+Distance is calculated using the Haversine formula.
+
+There is currently no automatic geocoding. Events without coordinates or a known city are marked as needing geocoding and excluded by the radius filter.
 
 ### Deduplication
 
-Events are treated as duplicates when their normalized event/artist name and date match, and, when both have coordinates, they are within 5 km of each other. Duplicates are merged, keeping all source URLs and filling in missing description, venue, city, address, coordinates and distance.
+Events are considered duplicates when their normalized event/artist name and date match and, when both have coordinates, they are within 5 km of each other.
+
+Duplicate records are merged while preserving source URLs and filling missing event information where possible.
 
 ## Configuration
 
-The search is configured in [`config/events.yaml`](config/events.yaml):
+Configuration is stored in [`config/events.yaml`](config/events.yaml):
 
 ```yaml
 center:
   name: Joutsa
   latitude: 61.742667
   longitude: 26.112972
-
 radius_km: 100
-
 lookahead_weeks: 3
-
 categories:
   - concert
   - live_music
@@ -137,87 +124,100 @@ categories:
   - cultural
 ```
 
-The file is parsed with PyYAML and validated with Pydantic (`src/config/schema.py`).
+Configuration is parsed with PyYAML and validated with Pydantic.
 
 | Field | Effect |
 |---|---|
-| `center.latitude`, `center.longitude` | Center point for the radius filter |
-| `center.name` | Validated; informational |
-| `radius_km` | Radius filter distance (must be positive) |
-| `lookahead_weeks` | Number of weeks in the search period and the digest |
-| `categories` | Validated (at least one), but **not currently used** to generate or filter searches |
+| `center.latitude`, `center.longitude` | Center point for radius filtering |
+| `center.name` | Validated informational field |
+| `radius_km` | Radius filter distance |
+| `lookahead_weeks` | Search period and digest length |
+| `categories` | Validated but not currently used for search generation or filtering |
 
-The search geography is **hard-coded in Python**: the cities, venues, event aggregators and official calendars used for search queries (`queries.py`) and the city coordinate table (`locations.py`) cover the Joutsa region. Changing `center` or `radius_km` changes the radius filter, not which places are searched.
+The search geography is currently hard-coded in Python. Changing the configured center or radius changes radius filtering, but does not change which cities, venues, or sources are searched.
+
+## Validation and error handling
+
+Pydantic models validate API requests and configuration.
+
+The API validates:
+
+- latitude and longitude ranges
+- positive radius values
+- date ranges
+- finite numeric values
+- event and location structures
+
+Batch processing skips and logs individual malformed events instead of failing the complete batch.
 
 ## Project structure
 
 ```text
 event-scout/
-├── .github/workflows/tests.yml   # CI: pytest on push and pull request
+├── .github/
+│   └── workflows/
+│       └── tests.yml              # GitHub Actions CI
 ├── config/
-│   ├── events.yaml               # search configuration
-│   ├── test-event-page.html      # saved event page (n8n test branch and tests)
-│   ├── fetch-event-pages.json    # captured n8n data from development
-│   └── radius-events.json        # captured n8n data from development
-├── n8n/data/                     # local n8n state (gitignored)
+│   ├── events.yaml                # Search configuration
+│   └── test-event-page.html       # Saved page for repeatable testing
+├── n8n/
+│   └── data/                      # Local n8n state (gitignored)
 ├── src/
 │   ├── config/
-│   │   ├── parser.py             # YAML parsing
-│   │   └── schema.py             # configuration models
+│   │   ├── parser.py              # YAML parsing
+│   │   └── schema.py              # Configuration models
 │   └── event_digest/
-│       ├── api.py                # FastAPI endpoints and request models
-│       ├── models.py             # Event/Location validation models
-│       ├── errors.py             # JSON-safe validation-error handling
-│       ├── search_context.py     # configuration + date range
-│       ├── queries.py            # search query generation
-│       ├── extraction.py         # JSON-LD and Allevents extraction
-│       ├── dates.py              # date range and date filtering
-│       ├── locations.py          # location resolution and radius filter
-│       └── deduplication.py      # duplicate merging
+│       ├── api.py                 # FastAPI endpoints and request models
+│       ├── models.py              # Event and Location models
+│       ├── errors.py              # Validation-error handling
+│       ├── search_context.py      # Configuration + date range
+│       ├── queries.py             # Search query generation
+│       ├── extraction.py          # JSON-LD and Allevents extraction
+│       ├── dates.py               # Date calculation and filtering
+│       ├── locations.py            # Location resolution and radius filtering
+│       └── deduplication.py       # Duplicate merging
 ├── tests/
-│   ├── fixtures/                 # saved Allevents listing pages
+│   ├── fixtures/                  # Saved event pages
 │   └── test_*.py
 ├── workflows/
-│   └── Weekly Event Scout.json   # n8n workflow export
+│   └── Weekly Event Scout.json    # n8n workflow export
 ├── docker-compose.yml
 ├── Dockerfile
 ├── Makefile
-├── pyproject.toml                # pytest configuration
+├── pyproject.toml
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── MVP.md
 └── README.md
 ```
 
-## Running
+## Running locally
 
 ### Requirements
 
 - Docker and Docker Compose
-- Python 3.10 (the version used by the Docker image and CI) for local development and tests
+- Python 3.10
 
-### Docker
-
-n8n and the Python API run as separate services on a shared Docker network:
+### Start the services
 
 ```bash
 docker compose up -d
 ```
 
-| Service | Host URL | From n8n |
+| Service | Host | n8n |
 |---|---|---|
-| n8n | `http://localhost:5679` | |
+| n8n | `http://localhost:5679` | — |
 | FastAPI | `http://localhost:8000` | `http://python-api:8000` |
 
 The `config/` directory is mounted into the n8n container at `/home/node/.n8n-files/config`.
 
-After changing Python source code, rebuild and restart the API container:
+After changing Python source code:
 
 ```bash
 make rebuild
 ```
 
-### Local environment
+### Local Python environment
 
 ```bash
 python3 -m venv .venv
@@ -227,44 +227,69 @@ pip install -r requirements-dev.txt
 
 ## Testing
 
-Tests use pytest and run with:
+Run the complete test suite with:
 
 ```bash
 make test
 ```
 
-(equivalent to `python -m pytest`). The same test suite runs in GitHub Actions on every push and pull request.
+The same suite runs in GitHub Actions on every push and pull request.
 
-The suite covers:
+The tests cover:
 
 - configuration parsing and validation
-- date range calculation and date filtering
-- event extraction, including regression tests against saved real pages (JamBase, Allevents, ConcertArchives)
+- date calculation and filtering
+- event extraction
+- regression cases using saved real event pages
 - location resolution and radius filtering
 - deduplication
-- event models and validation-error handling
-- the API boundary, including request validation, error responses, and a full pipeline run through the API in the same order as the n8n workflow
+- Pydantic models
+- API validation and error handling
+- the complete API pipeline in the same order as the n8n workflow
 
-Tests that document known limitations are kept in clearly marked "known issues" sections.
-
-With the search period 2026-09-28 to 2026-10-18 and a 100 km radius around Joutsa, the saved JamBase page `config/test-event-page.html` produces:
+For the current saved JamBase test page, using a 100 km radius around Joutsa and the period 2026-09-28 to 2026-10-18:
 
 ```text
 181 extracted events
-        ↓
- 71 after date filtering
-        ↓
-  8 within the radius
-        ↓
-  6 after deduplication
+        |
+        v
+71 after date filtering
+        |
+        v
+8 within the radius
+        |
+        v
+6 after deduplication
 ```
 
 ## Technology
 
-Python, FastAPI, Pydantic, PyYAML, Uvicorn, pytest, Docker, Docker Compose, GitHub Actions, n8n, Tavily Search API, Gmail.
+- Python 3.10
+- FastAPI
+- Pydantic
+- PyYAML
+- Uvicorn
+- pytest
+- Docker / Docker Compose
+- GitHub Actions
+- n8n
+- Tavily Search API
+- Gmail
 
 ## Status
 
-The Python/FastAPI pipeline, API validation and automated tests are implemented. The n8n workflow has been run end-to-end, and is currently kept manual and inactive, with the live search (Tavily) and email (Gmail) paths disconnected. The saved test page can be used to run the pipeline without them.
+The Python/FastAPI application, API validation, event-processing pipeline, automated tests, Docker setup, CI, and n8n workflow are implemented.
 
-Not implemented: scheduled automation, persistence, authentication, deployment, geocoding, and configurable search geography. See [MVP.md](MVP.md) for scope and future ideas.
+The current workflow is intentionally kept manual and inactive. Live Tavily search and Gmail delivery are disconnected, while the saved test page provides a repeatable local test path.
+
+### Not currently implemented
+
+- Scheduled automation
+- Persistence/database
+- Authentication
+- Deployment
+- Automatic geocoding
+- Configurable search geography
+- Using `categories` to control search generation/filtering
+
+These are potential future extensions rather than requirements of the current MVP.
